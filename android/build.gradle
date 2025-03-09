@@ -1,0 +1,150 @@
+buildscript {
+    ext.kotlin_version = '1.9.22'
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:7.3.1'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+plugins {
+    id 'com.android.library'
+    id 'kotlin-android'
+    id 'maven-publish'
+}
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader ->
+        localProperties.load(reader)
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        // Add JitPack repository for Git dependencies
+        maven { url 'https://jitpack.io' }
+    }
+}
+
+android {
+    compileSdkVersion 34
+    namespace 'com.michaeljperri.flutter_sequencer'
+
+    sourceSets {
+        main.java.srcDirs += 'src/main/kotlin'
+    }
+
+    defaultConfig {
+        minSdkVersion 21
+        targetSdkVersion 34
+        
+        externalNativeBuild {
+            cmake {
+                cppFlags '-std=c++17'
+                arguments "-DANDROID_STL=c++_shared"
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    ndkVersion "26.1.10909125"
+    externalNativeBuild {
+        cmake {
+            version "3.18.1"
+            path "CMakeLists.txt"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+
+    publishing {
+        singleVariant('release') {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
+    implementation 'org.eclipse.jgit:org.eclipse.jgit:6.8.0.202311291450-r'
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+}
+
+// Third-party repository management
+def downloadAndExtract(String name, String url, String commit) {
+    def dirPath = "$projectDir/third_party/$name"
+    def dir = new File(dirPath)
+
+    if (!dir.exists()) {
+        dir.mkdirs()
+        
+        // Download using Git
+        ["git", "clone", url, dirPath].execute().waitFor()
+        
+        // Checkout specific commit
+        ["git", "-C", dirPath, "checkout", commit].execute().waitFor()
+        
+        // Update submodules
+        ["git", "-C", dirPath, "submodule", "update", "--init", "--recursive"].execute().waitFor()
+    }
+}
+
+task downloadDependencies {
+    doLast {
+        downloadAndExtract(
+            'oboe',
+            'https://github.com/google/oboe',
+            '06ec23e4f6bc00ba7eea9b84e299f9200a598838'
+        )
+        downloadAndExtract(
+            'TinySoundFont',
+            'https://github.com/schellingb/TinySoundFont.git',
+            'bf574519e601202c3a9d27a74f345921277eed39'
+        )
+        downloadAndExtract(
+            'sfizz',
+            'https://github.com/sfztools/sfizz.git',
+            'fc1f0451cebd8996992cbc4f983fcf76b03295c5'
+        )
+    }
+}
+
+preBuild.dependsOn downloadDependencies
+
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                groupId = 'com.michaeljperri.flutter_sequencer'
+                artifactId = 'flutter_sequencer'
+                version = '1.0'
+            }
+        }
+    }
+}

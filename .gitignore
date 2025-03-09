@@ -1,0 +1,152 @@
+# Flutter/Dart specific
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+pubspec.lock
+.pub/
+build/
+.pub-cache/
+*.dill
+*.dill.track.dill
+**/Generated.xcconfig
+**/flutter_export_environment.sh
+
+# FVM Version Cache
+.fvm/
+
+# Keep example folder structure but ignore build artifacts
+example/build/
+example/.dart_tool/
+example/.flutter-plugins
+example/.flutter-plugins-dependencies
+example/.packages
+example/pubspec.lock
+example/.pub/
+example/*.dill
+example/*.dill.track.dill
+example/.idea/
+example/.vscode/
+example/android/.cxx/
+example/ios/Flutter/.last_build_id
+example/ios/Flutter/App.framework/
+example/ios/Flutter/Flutter.framework/
+example/ios/Flutter/Flutter.podspec
+example/ios/Flutter/Generated.xcconfig
+example/ios/Flutter/flutter_export_environment.sh
+example/ios/Pods/
+example/ios/Runner.xcworkspace/
+
+# Only ignore large assets, keep small ones
+example/assets/**/*.wav
+example/assets/**/*.mp3
+example/assets/**/*.sf2
+example/assets/**/*.sfz
+# But ensure we keep some small example assets for demo purposes 
+!example/assets/README.md
+
+# Git objects in subdirectories
+**/.git/
+
+# iOS specific - these are usually large
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/Generated.xcconfig
+ios/Flutter/App.framework
+ios/Flutter/ephemeral/
+ios/build/
+ios/Runner.xcworkspace/xcshareddata/
+ios/**/*.mode1v3
+ios/**/*.mode2v3
+ios/**/*.moved-aside
+ios/**/*.pbxuser
+ios/**/*.perspectivev3
+ios/**/*sync/
+ios/**/.sconsign.dblite
+ios/**/.tags*
+ios/**/.vagrant/
+ios/**/DerivedData/
+ios/**/Pods/
+ios/**/.symlinks/
+ios/**/profile
+ios/**/xcuserdata
+ios/.generated/
+ios/ExportOptions.plist
+
+# Android specific
+android/.gradle/
+android/build/
+android/app/build/
+android/gradle/
+android/local.properties
+android/captures/
+android/.cxx/
+android/.externalNativeBuild/
+android/key.properties
+android/app/release/
+android/*.iml
+android/app/*.iml
+**/local.properties
+
+# C++ specific - these are almost always large
+**/build/
+**/third_party/
+**/*.a
+**/*.so
+**/*.dylib
+**/*.dll
+**/*.lib
+**/*.o
+**/*.obj
+**/*.pdb
+**/*.ilk
+**/*.exp
+**/*.res
+**/*.rsp
+**/*.tlog
+**/*.idb
+**/*.manifest
+**/*.ipch
+**/*.sdf
+**/*.opensdf
+**/*.suo
+**/*.log
+**/*.apk
+**/*.jar
+**/*.dex
+
+# Benchmark/sample files
+**/*.wav
+
+# MacOS specific
+.DS_Store
+**/.DS_Store
+
+# IDE specific
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Temporary files
+*.swp
+*.tmp
+*.bak
+*~
+
+# Log files
+*.log
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Don't ignore all of third_party, just the large parts
+!android/third_party/sfizz/include/
+!ios/third_party/sfizz/include/
+
+# Add .gitkeep files to ensure directories are tracked
+!**/example/**/.gitkeep
