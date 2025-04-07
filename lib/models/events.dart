@@ -16,15 +16,21 @@ abstract class SchedulerEvent {
   SchedulerEvent({
     required this.beat,
     required this.type,
+    this.frame = 0,
   });
 
   double beat;
   final int type;
+  int frame; // Frame position relative to sequence start
 
   ByteData serializeBytes(int sampleRate, double tempo, int correctionFrames) {
     final data = ByteData(SCHEDULER_EVENT_SIZE);
-    final us = ((1 / tempo) * beat * 60000000).round();
-    final frame = ((us * sampleRate) / 1000000).round() + correctionFrames;
+    
+    // If frame is set, use it directly, otherwise calculate from beat
+    if (frame <= 0) {
+      final us = ((1 / tempo) * beat * 60000000).round();
+      frame = ((us * sampleRate) / 1000000).round() + correctionFrames;
+    }
 
     data.setUint32(0, frame, Endian.host);
     data.setUint32(4, type, Endian.host);

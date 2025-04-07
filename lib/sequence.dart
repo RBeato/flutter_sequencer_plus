@@ -329,12 +329,14 @@ class Sequence {
   /// Returns the number of frames elapsed since the last audio render callback
   /// was called.
   int _getFramesSinceLastRender() {
+    // Get the microseconds since last render
     final microsecondsSinceLastRender = max(
         0,
         DateTime.now().microsecondsSinceEpoch -
             NativeBridge.getLastRenderTimeUs());
 
-    return globalState.usToFrames(microsecondsSinceLastRender);
+    // Convert to frames - need to ensure we're passing an int
+    return globalState.usToFrames(microsecondsSinceLastRender.toInt());
   }
 
   Future<Track?> _createTrack(Instrument instrument) async {

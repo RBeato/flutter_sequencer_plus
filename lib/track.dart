@@ -8,6 +8,7 @@ import 'models/instrument.dart';
 import 'models/events.dart';
 import 'native_bridge.dart';
 import 'sequence.dart';
+import 'global_state.dart';
 
 /// Represents a track. A track belongs to a sequence and has a collection of
 /// events.
@@ -26,58 +27,37 @@ class Track {
       {required Sequence sequence, required Instrument instrument}) async {
     int? id;
 
-    if (instrument is Sf2Instrument) {
-      id = await NativeBridge.addTrackSf2(
-          instrument.idOrPath, instrument.isAsset, instrument.presetIndex);
-    } else if (instrument is SfzInstrument) {
-      final sfzFile = File(instrument.idOrPath);
-      String? normalizedSfzPath;
-
-      if (instrument.isAsset) {
-        final normalizedSfzDir =
-            await NativeBridge.normalizeAssetDir(sfzFile.parent.path);
-
-        if (normalizedSfzDir == null)
-          throw Exception(
-              'Could not normalize asset dir for ${sfzFile.parent.path}');
-        normalizedSfzPath = '$normalizedSfzDir/${p.basename(sfzFile.path)}';
-      } else {
-        normalizedSfzPath = sfzFile.path;
-      }
-
-      id = await NativeBridge.addTrackSfz(
-          normalizedSfzPath, instrument.tuningPath);
-    } else if (instrument is RuntimeSfzInstrument) {
-      final sfzContent = instrument.sfz.buildString();
-      String? normalizedSampleRoot;
-
-      if (instrument.isAsset) {
-        normalizedSampleRoot =
-            await NativeBridge.normalizeAssetDir(instrument.sampleRoot);
-
-        if (normalizedSampleRoot == null)
-          throw Exception(
-              'Could not normalize asset dir for ${instrument.sampleRoot}');
-      } else {
-        normalizedSampleRoot = instrument.sampleRoot;
-      }
-
-      // Sfizz uses the parent path of this (line 73 of Parser.cpp)
-      final fakeSfzDir = '$normalizedSampleRoot/does_not_exist.sfz';
-
-      id = await NativeBridge.addTrackSfzString(
-          fakeSfzDir, sfzContent, instrument.tuningString);
-    } else if (instrument is AudioUnitInstrument) {
-      id = await NativeBridge.addTrackAudioUnit(instrument.idOrPath);
-    } else {
-      throw Exception('Instrument not recognized');
+    // First check if the engine is actually ready
+    if (!GlobalState().isEngineReady) {
+      print('Engine is not ready. Cannot create track.');
+      return null;
     }
 
-    if (id == -1) return null;
+    try {
+      if (instrument is Sf2Instrument) {
+        id = await NativeBridge.addTrackSf2(
+            instrument.idOrPath, instrument.isAsset, instrument.presetIndex);
+      } else if (instrument is SfzInstrument) {
+        id = await NativeBridge.addTrackSfz(
+            instrument.idOrPath, instrument.tuningPath);
+      } else if (instrument is RuntimeSfzInstrument) {
+        id = await NativeBridge.addTrackSfzString(
+            instrument.sampleRoot, instrument.sfz.buildString(), null);
+      } else if (instrument is AudioUnitInstrument) {
+        id = await NativeBridge.addTrackAudioUnit(instrument.idOrPath);
+      } else {
+        throw Exception('Instrument not recognized');
+      }
+    } catch (e) {
+      print('Error creating track: $e');
+      return null;
+    }
+
+    if (id == -1 || id == null) return null;
 
     return Track._withId(
       sequence: sequence,
-      id: id!,
+      id: id,
       instrument: instrument,
     );
   }
@@ -85,55 +65,83 @@ class Track {
   /// Handles a Note On event on this track immediately.
   /// The event will not be added to this track's events.
   void startNoteNow({required int noteNumber, required double velocity}) {
-    final nextBeat = sequence.getBeat();
+    print('Track $id: Starting note $noteNumber with velocity $velocity');
     final event = MidiEvent.ofNoteOn(
-        beat: nextBeat,
-        noteNumber: noteNumber,
-        velocity: _velocityToMidi(velocity));
-
-    NativeBridge.handleEventsNow(
-        id, [event], Sequence.globalState.sampleRate!, sequence.tempo);
+      beat: 0, // Immediate processing
+      noteNumber: noteNumber,
+      velocity: _velocityToMidi(velocity),
+    );
+    
+    try {
+      NativeBridge.handleTrackEventsNow(id, [event]);
+    } catch (e) {
+      print('Error starting note: $e');
+    }
   }
 
   /// Handles a Note Off event on this track immediately.
   /// The event will not be added to this track's events.
   void stopNoteNow({required int noteNumber}) {
-    final nextBeat = sequence.getBeat();
-    final event = MidiEvent.ofNoteOff(beat: nextBeat, noteNumber: noteNumber);
-
-    NativeBridge.handleEventsNow(
-        id, [event], Sequence.globalState.sampleRate!, sequence.tempo);
+    print('Track $id: Stopping note $noteNumber');
+    final event = MidiEvent.ofNoteOff(
+      beat: 0, // Immediate processing
+      noteNumber: noteNumber,
+    );
+    
+    try {
+      NativeBridge.handleTrackEventsNow(id, [event]);
+    } catch (e) {
+      print('Error stopping note: $e');
+    }
   }
 
   /// Handles a MIDI CC event on this track immediately.
   /// The event will not be added to this track's events.
   void midiCCNow({required int ccNumber, required int ccValue}) {
-    final nextBeat = sequence.getBeat();
-    final event =
-        MidiEvent.cc(beat: nextBeat, ccNumber: ccNumber, ccValue: ccValue);
-
-    NativeBridge.handleEventsNow(
-        id, [event], Sequence.globalState.sampleRate!, sequence.tempo);
+    print('Track $id: Sending MIDI CC $ccNumber with value $ccValue');
+    final event = MidiEvent.cc(
+      beat: 0, // Immediate processing
+      ccNumber: ccNumber, 
+      ccValue: ccValue
+    );
+    
+    try {
+      NativeBridge.handleTrackEventsNow(id, [event]);
+    } catch (e) {
+      print('Error sending MIDI CC: $e');
+    }
   }
 
   /// Handles a MIDI pitch bend event on this track immediately.
   /// The event will not be added to this track's events.
   void midiPitchBendNow({required double value}) {
-    final nextBeat = sequence.getBeat();
-    final event = MidiEvent.pitchBend(beat: nextBeat, value: value);
-
-    NativeBridge.handleEventsNow(
-        id, [event], Sequence.globalState.sampleRate!, sequence.tempo);
+    print('Track $id: Sending pitch bend with value $value');
+    final event = MidiEvent.pitchBend(
+      beat: 0, // Immediate processing
+      value: value
+    );
+    
+    try {
+      NativeBridge.handleTrackEventsNow(id, [event]);
+    } catch (e) {
+      print('Error sending pitch bend: $e');
+    }
   }
 
   /// Handles a Volume Change event on this track immediately.
   /// The event will not be added to this track's events.
   void changeVolumeNow({required double volume}) {
-    final nextBeat = sequence.getBeat();
-    final event = VolumeEvent(beat: nextBeat, volume: volume);
-
-    NativeBridge.handleEventsNow(
-        id, [event], Sequence.globalState.sampleRate!, sequence.tempo);
+    print('Track $id: Changing volume to $volume');
+    final volumeEvent = VolumeEvent(
+      beat: 0, // Immediate processing
+      volume: volume
+    );
+    
+    try {
+      NativeBridge.handleTrackEventsNow(id, [volumeEvent]);
+    } catch (e) {
+      print('Error changing volume: $e');
+    }
   }
 
   /// Adds a Note On and Note Off event to this track.
@@ -223,8 +231,7 @@ class Track {
 
   /// Syncs events to the backend. This should be called after making changes to
   /// track events to ensure that the changes are synced immediately.
-  void syncBuffer(
-      [int? absoluteStartFrame, int maxEventsToSync = BUFFER_SIZE]) {
+  void syncBuffer([int? absoluteStartFrame, int maxEventsToSync = BUFFER_SIZE]) {
     final position = NativeBridge.getPosition();
 
     if (absoluteStartFrame == null) {
@@ -233,8 +240,7 @@ class Track {
       absoluteStartFrame = max(absoluteStartFrame, position);
     }
 
-    NativeBridge.clearEvents(id, absoluteStartFrame);
-
+    // Schedule all events
     if (sequence.isPlaying) {
       final relativeStartFrame = absoluteStartFrame - sequence.engineStartFrame;
       _scheduleEvents(relativeStartFrame, maxEventsToSync);
@@ -243,21 +249,23 @@ class Track {
     }
   }
 
-  /// {@macro flutter_sequencer_library_private}
   /// Triggers a sync that will fill any available space in the buffer with
   /// any un-synced events.
   void topOffBuffer() {
-    final bufferAvailableCount = NativeBridge.getBufferAvailableCount(id);
-
-    if (bufferAvailableCount > 0) {
-      syncBuffer(lastFrameSynced + 1, bufferAvailableCount);
-    }
+    // In the updated implementation, we'll simply sync all events that haven't been synced yet
+    syncBuffer(lastFrameSynced + 1, BUFFER_SIZE);
   }
 
   /// {@macro flutter_sequencer_library_private}
   /// Clears any scheduled events in the backend.
   void clearBuffer() {
-    NativeBridge.clearEvents(id, 0);
+    // Clear events from a specific frame
+    NativeBridge.clearTrackEvents(id, 0);
+  }
+
+  /// Resets the track by removing all scheduled events
+  void resetTrack() {
+    NativeBridge.resetTrack(id);
   }
 
   /// Adds an event to the event list at the appropriate index given the sort
@@ -284,104 +292,39 @@ class Track {
   /// Builds events that can be scheduled in the sequencer engine's event buffer
   /// and adds them to eventsList.
   void _scheduleEvents(int startFrame, [int maxEventsToSync = BUFFER_SIZE]) {
-    final isBeforeLoopEnd = sequence.loopState == LoopState.BeforeLoopEnd;
-    final loopLength = sequence.getLoopLengthFrames();
-    final loopsElapsed = sequence.loopState == LoopState.Off
-        ? 0
-        : sequence.getLoopsElapsed(startFrame);
-
-    var eventsSyncedCount = _scheduleEventsInRange(
-        maxEventsToSync,
-        isBeforeLoopEnd ? sequence.getLoopedFrame(startFrame) : startFrame,
-        sequence.beatToFrames(
-            isBeforeLoopEnd ? sequence.loopEndBeat : sequence.endBeat),
-        loopLength * loopsElapsed);
-
-    if (isBeforeLoopEnd) {
-      var loopIndex = loopsElapsed + 1;
-      var lastBatchCount = 0;
-      final loopStartFrame = sequence.beatToFrames(sequence.loopStartBeat);
-      final loopEndFrame = sequence.beatToFrames(sequence.loopEndBeat);
-
-      while (eventsSyncedCount < maxEventsToSync) {
-        // Schedule all events in one loop range
-        lastBatchCount = _scheduleEventsInRange(
-            maxEventsToSync - eventsSyncedCount,
-            loopStartFrame,
-            loopEndFrame,
-            loopLength * loopIndex);
-
-        eventsSyncedCount += lastBatchCount;
-        if (lastBatchCount == 0) break;
-        loopIndex++;
-      }
-    }
-  }
-
-  /// Schedules this track's events that start on or after startBeat and end
-  /// on or before endBeat. Adds frameOffset to every scheduled event.
-  int _scheduleEventsInRange(
-      int maxEventsToSync, int startFrame, int? endFrame, int frameOffset) {
-    final eventsToSync = <SchedulerEvent>[];
-
-    for (var eventIndex = 0; eventIndex < events.length; eventIndex++) {
-      if (eventsToSync.length == maxEventsToSync) break;
-
-      final event = events[eventIndex];
+    final eventsToSchedule = <SchedulerEvent>[];
+    
+    // Find events within the relevant range that need scheduling
+    for (final event in events) {
       final eventFrame = sequence.beatToFrames(event.beat);
-
-      if (eventFrame < startFrame) continue;
-      if (endFrame != null && eventFrame > endFrame) break;
-
-      eventsToSync.add(event);
+      if (eventFrame >= startFrame && eventFrame < startFrame + maxEventsToSync) {
+        // Make sure each event has the correct frame position
+        event.frame = eventFrame - sequence.engineStartFrame;
+        eventsToSchedule.add(event);
+      }
     }
-
-    final eventsSyncedCount = NativeBridge.scheduleEvents(
-        id,
-        eventsToSync,
-        Sequence.globalState.sampleRate!,
-        sequence.tempo,
-        sequence.engineStartFrame + frameOffset);
-
-    if (eventsSyncedCount > 0) {
-      lastFrameSynced = sequence.engineStartFrame +
-          sequence.beatToFrames(eventsToSync[eventsSyncedCount - 1].beat) +
-          frameOffset;
+    
+    if (eventsToSchedule.isNotEmpty) {
+      print('Scheduling ${eventsToSchedule.length} events on track $id');
+      final scheduledCount = NativeBridge.scheduleTrackEvents(id, eventsToSchedule);
+      print('Successfully scheduled $scheduledCount events');
+      
+      // Update the last frame we synced to
+      if (eventsToSchedule.isNotEmpty) {
+        final lastEventBeat = eventsToSchedule.last.beat;
+        lastFrameSynced = sequence.beatToFrames(lastEventBeat);
+      }
     }
-
-    return eventsSyncedCount;
   }
 
-  /// Used for ordering events.
-  int _compareEvents(SchedulerEvent eventA, SchedulerEvent eventB) {
-    final beatComparison = eventA.beat.compareTo(eventB.beat);
-
-    if (beatComparison != 0) {
-      return beatComparison;
+  /// Compares two events for sorting by time.
+  int _compareEvents(SchedulerEvent a, SchedulerEvent b) {
+    if (a.beat < b.beat) {
+      return -1;
+    } else if (a.beat > b.beat) {
+      return 1;
     } else {
-      // Beats are the same
-
-      if (eventA is VolumeEvent && !(eventB is VolumeEvent)) {
-        // Volume should come before anything else
-        return -1;
-      } else if (eventB is VolumeEvent && !(eventA is VolumeEvent)) {
-        return 1;
-      } else if (eventA is MidiEvent && eventB is MidiEvent) {
-        // Note off should come before note on if the note is the same
-        if (eventA.midiData1 == eventB.midiData1 &&
-            eventA.midiStatus == MIDI_STATUS_NOTE_OFF &&
-            eventB.midiStatus == MIDI_STATUS_NOTE_ON) {
-          return -1;
-        } else if (eventA.midiData1 == eventB.midiData1 &&
-            eventA.midiStatus == MIDI_STATUS_NOTE_ON &&
-            eventB.midiStatus == MIDI_STATUS_NOTE_OFF) {
-          return 1;
-        } else {
-          return 0;
-        }
-      } else {
-        return 0;
-      }
+      return 0;
     }
   }
 

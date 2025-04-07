@@ -9,6 +9,16 @@
 // The global engine variable is already defined in AudioEngine.cpp
 // and declared as extern in AndroidEngine.h
 
+// Define the function pointer for Dart_PostCObject
+typedef bool (*Dart_PostCObjectFn)(Dart_Port port_id, Dart_CObject *message);
+Dart_PostCObjectFn Dart_PostCObject_DL;
+
+// Initialize the function pointer
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+void register_post_cobject(Dart_PostCObjectFn fn) {
+    Dart_PostCObject_DL = fn;
+}
+
 void check_engine()
 {
     if (engine == nullptr)
@@ -26,8 +36,125 @@ void setInstrumentOutputFormat(IInstrument *instrument)
     instrument->setOutputFormat(sampleRate, isStereo);
 }
 
-extern "C"
-{
+// JNI implementation for callbacks
+extern "C" {
+
+    // JNI method for setupEngine
+    JNIEXPORT jint JNICALL Java_com_michaeljperri_flutter_1sequencer_FlutterSequencerPlugin_setupEngine(
+        JNIEnv *env, jobject thiz)
+    {
+        try {
+            if (engine == nullptr) {
+                // We're using 0 for the callback port since we're not using Dart callbacks here
+                engine = new AndroidEngine(0);
+            }
+            return engine->getSampleRate();
+        } catch (const std::exception& e) {
+            LOGE("Error setting up engine: %s", e.what());
+            return -1;
+        }
+    }
+
+    // Add JNI method for handling events now
+    JNIEXPORT void JNICALL Java_com_michaeljperri_flutter_1sequencer_FlutterSequencerPlugin_handleEventsNow(
+        JNIEnv *env, jobject thiz, jint trackId, jbyteArray events, jint eventCount)
+    {
+        try {
+            check_engine();
+            
+            // Convert Java byte array to C++ array
+            jbyte* eventBytes = env->GetByteArrayElements(events, nullptr);
+            SchedulerEvent nativeEvents[eventCount];
+            
+            // Convert raw event bytes to SchedulerEvent objects - Use the already defined function
+            rawEventDataToEvents(reinterpret_cast<uint8_t*>(eventBytes), static_cast<uint32_t>(eventCount), nativeEvents);
+            
+            // Handle the events immediately
+            engine->mSchedulerMixer.handleEventsNow(trackId, nativeEvents, eventCount);
+            
+            // Release the byte array
+            env->ReleaseByteArrayElements(events, eventBytes, JNI_ABORT);
+        } catch (const std::exception& e) {
+            LOGE("Error handling events now: %s", e.what());
+        }
+    }
+    
+    // Add JNI method for scheduling events
+    JNIEXPORT jint JNICALL Java_com_michaeljperri_flutter_1sequencer_FlutterSequencerPlugin_scheduleEvents(
+        JNIEnv *env, jobject thiz, jint trackId, jbyteArray events, jint eventCount)
+    {
+        try {
+            check_engine();
+            
+            // Convert Java byte array to C++ array
+            jbyte* eventBytes = env->GetByteArrayElements(events, nullptr);
+            SchedulerEvent nativeEvents[eventCount];
+            
+            // Convert raw event bytes to SchedulerEvent objects
+            rawEventDataToEvents(reinterpret_cast<uint8_t*>(eventBytes), static_cast<uint32_t>(eventCount), nativeEvents);
+            
+            // Schedule the events
+            int result = engine->mSchedulerMixer.scheduleEvents(trackId, nativeEvents, eventCount);
+            
+            // Release the byte array
+            env->ReleaseByteArrayElements(events, eventBytes, JNI_ABORT);
+            
+            return result;
+        } catch (const std::exception& e) {
+            LOGE("Error scheduling events: %s", e.what());
+            return -1;
+        }
+    }
+    
+    // Add JNI method for clearing events
+    JNIEXPORT void JNICALL Java_com_michaeljperri_flutter_1sequencer_FlutterSequencerPlugin_clearEvents(
+        JNIEnv *env, jobject thiz, jint trackId, jint fromFrame)
+    {
+        try {
+            check_engine();
+            
+            // Clear the events
+            engine->mSchedulerMixer.clearEvents(trackId, fromFrame);
+        } catch (const std::exception& e) {
+            LOGE("Error clearing events: %s", e.what());
+        }
+    }
+    
+    // Add JNI method for adding SF2 track
+    JNIEXPORT jint JNICALL Java_com_michaeljperri_flutter_1sequencer_FlutterSequencerPlugin_addTrackSf2(
+        JNIEnv *env, jobject thiz, jstring path, jboolean isAsset, jint presetIndex)
+    {
+        try {
+            check_engine();
+            
+            // Convert Java string to C++ string
+            const char* nativePath = env->GetStringUTFChars(path, nullptr);
+            
+            // Create SF2 instrument
+            auto sf2Instrument = new SoundFontInstrument();
+            setInstrumentOutputFormat(sf2Instrument);
+            
+            // Load the SF2 file
+            auto didLoad = sf2Instrument->loadSf2File(nativePath, isAsset, presetIndex);
+            
+            // Release the string
+            env->ReleaseStringUTFChars(path, nativePath);
+            
+            if (didLoad) {
+                // Add the track to the mixer
+                auto trackIndex = engine->mSchedulerMixer.addTrack(sf2Instrument);
+                return trackIndex;
+            } else {
+                // Clean up and return error
+                delete sf2Instrument;
+                return -1;
+            }
+        } catch (const std::exception& e) {
+            LOGE("Error adding SF2 track: %s", e.what());
+            return -1;
+        }
+    }
+
     __attribute__((visibility("default"))) __attribute__((used)) void setup_engine(Dart_Port sampleRateCallbackPort)
     {
         engine = new AndroidEngine(sampleRateCallbackPort);

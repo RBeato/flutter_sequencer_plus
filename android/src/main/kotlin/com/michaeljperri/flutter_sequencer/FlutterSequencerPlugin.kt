@@ -96,6 +96,15 @@ class FlutterSequencerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
                 "listAudioUnits" -> {
                     result.success(emptyList<String>())
                 }
+                "setupEngine" -> {
+                    if (checkAndRequestPermissions()) {
+                        // Initialize the audio engine and return sample rate
+                        val sampleRate = setupEngine()
+                        result.success(sampleRate)
+                    } else {
+                        throw SecurityException("Required permissions not granted")
+                    }
+                }
                 "play" -> {
                     if (checkAndRequestPermissions()) {
                         AudioService.startService(context)
@@ -109,6 +118,125 @@ class FlutterSequencerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
                     audioEngine.pause()
                     AudioService.stopService(context)
                     result.success(null)
+                }
+                "addTrackSf2" -> {
+                    if (checkAndRequestPermissions()) {
+                        val path = call.argument<String>("path") ?: throw IllegalArgumentException("path is required")
+                        val isAsset = call.argument<Boolean>("isAsset") ?: false
+                        val presetIndex = call.argument<Int>("presetIndex") ?: 0
+                        
+                        try {
+                            // Call our native implementation
+                            val trackId = addTrackSf2(path, isAsset, presetIndex)
+                            
+                            if (trackId >= 0) {
+                                result.success(trackId)
+                            } else {
+                                result.error("SF2_ERROR", "Failed to load SF2 instrument: $path", null)
+                            }
+                        } catch (e: Exception) {
+                            result.error("SF2_ERROR", "Error adding SF2 track: ${e.message}", null)
+                        }
+                    } else {
+                        throw SecurityException("Required permissions not granted")
+                    }
+                }
+                "addTrackSfz" -> {
+                    if (checkAndRequestPermissions()) {
+                        val sfzPath = call.argument<String>("sfzPath") ?: throw IllegalArgumentException("sfzPath is required")
+                        val tuningPath = call.argument<String>("tuningPath")
+                        
+                        try {
+                            // Call our native implementation
+                            val trackId = addTrackSfz(sfzPath, tuningPath)
+                            
+                            if (trackId >= 0) {
+                                result.success(trackId)
+                            } else {
+                                result.error("SFZ_ERROR", "Failed to load SFZ instrument: $sfzPath", null)
+                            }
+                        } catch (e: Exception) {
+                            result.error("SFZ_ERROR", "Error adding SFZ track: ${e.message}", null)
+                        }
+                    } else {
+                        throw SecurityException("Required permissions not granted")
+                    }
+                }
+                "addTrackSfzString" -> {
+                    if (checkAndRequestPermissions()) {
+                        val sampleRoot = call.argument<String>("sampleRoot") ?: throw IllegalArgumentException("sampleRoot is required")
+                        val sfzString = call.argument<String>("sfzString") ?: throw IllegalArgumentException("sfzString is required")
+                        val tuningString = call.argument<String>("tuningString")
+                        
+                        try {
+                            // Call our native implementation
+                            val trackId = addTrackSfzString(sampleRoot, sfzString, tuningString)
+                            
+                            if (trackId >= 0) {
+                                result.success(trackId)
+                            } else {
+                                result.error("SFZ_ERROR", "Failed to load SFZ string instrument", null)
+                            }
+                        } catch (e: Exception) {
+                            result.error("SFZ_ERROR", "Error adding SFZ string track: ${e.message}", null)
+                        }
+                    } else {
+                        throw SecurityException("Required permissions not granted")
+                    }
+                }
+                "handleTrackEventsNow" -> {
+                    if (checkAndRequestPermissions()) {
+                        val trackId = call.argument<Int>("trackId") ?: throw IllegalArgumentException("trackId is required")
+                        val events = call.argument<ByteArray>("events") ?: throw IllegalArgumentException("events are required")
+                        val eventCount = call.argument<Int>("eventCount") ?: throw IllegalArgumentException("eventCount is required")
+                        
+                        try {
+                            // Call our native implementation
+                            handleEventsNow(trackId, events, eventCount)
+                            result.success(null)
+                        } catch (e: Exception) {
+                            result.error("EVENT_ERROR", "Error handling events: ${e.message}", null)
+                        }
+                    } else {
+                        throw SecurityException("Required permissions not granted")
+                    }
+                }
+                "scheduleTrackEvents" -> {
+                    if (checkAndRequestPermissions()) {
+                        val trackId = call.argument<Int>("trackId") ?: throw IllegalArgumentException("trackId is required")
+                        val events = call.argument<ByteArray>("events") ?: throw IllegalArgumentException("events are required")
+                        val eventCount = call.argument<Int>("eventCount") ?: throw IllegalArgumentException("eventCount is required")
+                        
+                        try {
+                            // Call our native implementation
+                            val scheduledCount = scheduleEvents(trackId, events, eventCount)
+                            result.success(scheduledCount)
+                        } catch (e: Exception) {
+                            result.error("EVENT_ERROR", "Error scheduling events: ${e.message}", null)
+                        }
+                    } else {
+                        throw SecurityException("Required permissions not granted")
+                    }
+                }
+                "clearTrackEvents" -> {
+                    if (checkAndRequestPermissions()) {
+                        val trackId = call.argument<Int>("trackId") ?: throw IllegalArgumentException("trackId is required")
+                        val fromFrame = call.argument<Int>("fromFrame") ?: throw IllegalArgumentException("fromFrame is required")
+                        
+                        try {
+                            // Call our native implementation
+                            clearEvents(trackId, fromFrame)
+                            result.success(null)
+                        } catch (e: Exception) {
+                            result.error("EVENT_ERROR", "Error clearing events: ${e.message}", null)
+                        }
+                    } else {
+                        throw SecurityException("Required permissions not granted")
+                    }
+                }
+                "enableVerboseLogging" -> {
+                    // Add verbose logging support
+                    result.success(true)
                 }
                 else -> {
                     result.notImplemented()
@@ -197,6 +325,20 @@ class FlutterSequencerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     private external fun setupAssetManager(assetManager: AssetManager)
+    
+    private external fun setupEngine(): Int
+    
+    private external fun addTrackSf2(path: String, isAsset: Boolean, presetIndex: Int): Int
+    
+    private external fun addTrackSfz(sfzPath: String, tuningPath: String?): Int
+    
+    private external fun addTrackSfzString(sampleRoot: String, sfzString: String, tuningString: String?): Int
+    
+    private external fun handleEventsNow(trackId: Int, events: ByteArray, eventCount: Int)
+    
+    private external fun scheduleEvents(trackId: Int, events: ByteArray, eventCount: Int): Int
+    
+    private external fun clearEvents(trackId: Int, fromFrame: Int)
 
     private fun handleError(result: Result, error: Throwable) {
         when (error) {

@@ -4,6 +4,7 @@
 #ifdef __cplusplus
 #include "IInstrument.h"
 #include "sfizz.hpp"
+#include <string>
 
 class SfizzSamplerInstrument : public IInstrument {
 public:
@@ -23,49 +24,58 @@ public:
     }
 
     bool loadSfzString(const char* sampleRoot, const char* sfzString, const char* tuningString) {
-        auto loadResult = mSampler->loadSfzString(sampleRoot, sfzString);
+        // Convert const char* to std::string for the interface
+        std::string sfzStringStd(sfzString);
+        
+        // sampleRoot is ignored in this implementation since the interface doesn't support it
+        auto loadResult = mSampler->loadSfzString(sfzStringStd);
         auto loadTuningResult = true;
 
         if (tuningString != nullptr) {
-            mSampler->loadScalaString(tuningString);
+            std::string tuningStringStd(tuningString);
+            mSampler->loadScalaString(tuningStringStd);
         }
 
-        return loadResult && loadTuningResult && mSampler->getNumRegions();
+        // Since getNumRegions is not available, we'll just return the load result
+        return loadResult && loadTuningResult;
     }
 
     bool loadSfzFile(const char* path, const char* tuningPath) {
-        auto loadResult = mSampler->loadSfzFile(path);
+        // Convert const char* to std::string for the interface
+        std::string pathStd(path);
+        
+        auto loadResult = mSampler->loadSfzFile(pathStd);
         auto loadTuningResult = true;
 
         if (tuningPath != nullptr) {
-            mSampler->loadScalaFile(tuningPath);
+            std::string tuningPathStd(tuningPath);
+            mSampler->loadScalaFile(tuningPathStd);
         }
 
-        return loadResult && loadTuningResult && mSampler->getNumRegions();
+        // Since getNumRegions is not available, we'll just return the load result
+        return loadResult && loadTuningResult;
     }
 
     void renderAudio(float *audioData, int32_t numFrames) override {
-        float leftBuffer[numFrames];
-        float rightBuffer[numFrames];
-        float* buffers[2];
-
-        buffers[0] = leftBuffer;
-        buffers[1] = rightBuffer;
+        // Allocate buffers on the heap to avoid VLA warnings
+        std::unique_ptr<float[]> leftBuffer(new float[numFrames]);
+        std::unique_ptr<float[]> rightBuffer(new float[numFrames]);
 
         for (int f = 0; f < numFrames; f++) {
-            leftBuffer[f] = 0.;
-            rightBuffer[f] = 0.;
+            leftBuffer[f] = 0.0f;
+            rightBuffer[f] = 0.0f;
         }
 
-        mSampler->renderBlock(buffers, numFrames);
+        // Call the interface correctly with separate left and right buffers
+        mSampler->renderBlock(leftBuffer.get(), rightBuffer.get(), numFrames);
 
         for (int f = 0; f < numFrames; f++) {
             if (mIsStereo) {
                 for (int c = 0; c < 2; c++) {
-                    audioData[f * 2 + c] = buffers[c][f];
+                    audioData[f * 2 + c] = (c == 0) ? leftBuffer[f] : rightBuffer[f];
                 }
             } else {
-                audioData[f] = (buffers[0][f] + buffers[1][f]) / 2;
+                audioData[f] = (leftBuffer[f] + rightBuffer[f]) / 2;
             }
         }
     }

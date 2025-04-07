@@ -79,3 +79,9 @@ target_compile_definitions(flutter_sequencer
     $<$<CONFIG:Debug>:DEBUG>
     $<$<CONFIG:Release>:NDEBUG>
 )
+
+# Ensure we have Dart_PostCObject_DL available
+target_compile_definitions(flutter_sequencer
+    PRIVATE
+    DART_SHARED_LIB
+)

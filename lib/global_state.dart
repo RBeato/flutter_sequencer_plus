@@ -21,7 +21,7 @@ class GlobalState {
 
   var keepEngineRunning = false;
   final sequenceIdMap = <int, Sequence>{};
-  int? sampleRate;
+  double? sampleRate;
   var isEngineReady = false;
   Timer? _topOffTimer;
   int lastTickInBuffer = 0;
@@ -120,12 +120,28 @@ class GlobalState {
   }
 
   void _setupEngine() async {
-    sampleRate = await NativeBridge.doSetup();
+    sampleRate = await NativeBridge.setupEngine();
     isEngineReady = true;
     onEngineReadyCallbacks.forEach((callback) => callback());
 
     if (keepEngineRunning) {
       NativeBridge.play();
+    }
+  }
+
+  /// Explicitly setup the engine and wait for completion.
+  /// Returns true if the engine was successfully set up.
+  Future<bool> ensureEngineReady() async {
+    if (isEngineReady) return true;
+    
+    try {
+      sampleRate = await NativeBridge.setupEngine();
+      isEngineReady = true;
+      onEngineReadyCallbacks.forEach((callback) => callback());
+      return true;
+    } catch (e) {
+      print('Error ensuring engine is ready: $e');
+      return false;
     }
   }
 

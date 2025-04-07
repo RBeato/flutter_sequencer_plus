@@ -6,6 +6,9 @@ import 'package:flutter_sequencer/native_bridge.dart';
 import 'dart:developer' as developer;
 import 'dart:io' show Platform;
 import 'package:flutter/services.dart';
+import 'package:flutter_sequencer/flutter_sequencer.dart';
+import 'package:flutter_sequencer/global_state.dart';
+import 'dart:async';
 
 // Global log function that prints to both console and dev tools
 void debugLog(String message, {Object? error}) {
@@ -30,10 +33,8 @@ Future<void> enableNativeLogging() async {
 }
 
 void main() {
-  debugLog('App starting...');
-  WidgetsFlutterBinding.ensureInitialized();
-  debugLog('Flutter binding initialized');
-  enableNativeLogging();
+  // Initialize the native bridge before running the app
+  NativeBridge.initialize();
   runApp(const MyApp());
 }
 
@@ -68,7 +69,9 @@ class _TestPageState extends State<TestPage> {
   @override
   void initState() {
     super.initState();
-    debugLog('TestPage initialized');
+    _setupAssetManager();
+    debugLog('App starting...');
+    debugLog('Flutter binding initialized');
   }
   
   @override
@@ -103,7 +106,7 @@ class _TestPageState extends State<TestPage> {
             const SizedBox(height: 24),
             
             ElevatedButton(
-              onPressed: _initialize,
+              onPressed: _initializeEngine,
               child: const Text('1. Initialize Engine'),
             ),
             const SizedBox(height: 16),
@@ -142,21 +145,30 @@ class _TestPageState extends State<TestPage> {
     );
   }
   
-  Future<void> _initialize() async {
+  Future<void> _initializeEngine() async {
     try {
-      debugLog('🔄 [STEP 1] Initializing audio engine...');
-      
-      // On Android, try to enable verbose logging if not done already
+      debugLog('🔄 [STEP 1] Initializing native audio engine...');
       if (Platform.isAndroid) {
         await enableNativeLogging();
       }
       
-      debugLog('Calling NativeBridge.doSetup()');
-      final result = await NativeBridge.doSetup();
-      debugLog('🟢 [STEP 1] Engine setup result: $result');
-      debugLog('Native audio engine should be initialized now');
+      // Initialize native bridge first
+      NativeBridge.initialize();
+      
+      // Initialize asset manager
+      await NativeBridge.setupAssetManager();
+      
+      // Then setup the engine
+      debugLog('Calling NativeBridge.setupEngine()');
+      final sampleRate = await NativeBridge.setupEngine();
+      debugLog('🟢 [STEP 1] Engine setup with sample rate: $sampleRate');
+      debugLog('Native audio engine initialized with sample rate: $sampleRate Hz');
+      
+      // Explicitly ensure the global state engine is ready
+      await GlobalState().ensureEngineReady();
+      
       setState(() {
-        _status = 'Engine initialized (result: $result)';
+        _status = 'Engine initialized (sample rate: $sampleRate Hz)';
       });
     } catch (e) {
       debugLog('🔴 [STEP 1] ERROR: $e', error: e);
@@ -385,6 +397,15 @@ class _TestPageState extends State<TestPage> {
       });
     } catch (e) {
       debugLog('Error playing note $noteNumber: $e');
+    }
+  }
+
+  Future<void> _setupAssetManager() async {
+    try {
+      await NativeBridge.setupAssetManager();
+      debugLog('Asset manager initialized');
+    } catch (e) {
+      debugLog('Error initializing asset manager: $e');
     }
   }
 }

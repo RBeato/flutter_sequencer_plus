@@ -5,6 +5,7 @@ import CoreAudio
 import AVFoundation
 
 var plugin: SwiftFlutterSequencerPlugin!
+var Dart_PostCObject_DL: Dart_PostCObjectType? = nil
 
 enum PluginError: Error {
     case engineNotReady
@@ -32,17 +33,54 @@ public class SwiftFlutterSequencerPlugin: NSObject, FlutterPlugin {
     }
     
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-        if (call.method == "setupAssetManager") {
+        switch call.method {
+        case "getPlatformVersion":
+            result("iOS " + UIDevice.current.systemVersion)
+        case "setupAssetManager":
+            // No-op on iOS
             result(nil)
-        } else if (call.method == "normalizeAssetDir") {
-            let assetDir = (call.arguments as AnyObject)["assetDir"] as! String
-
-            result(normalizeAssetDir(registrar: registrar, assetDir: assetDir))
-        } else if (call.method == "listAudioUnits") {
-            listAudioUnits { result($0) }
-        } else if (call.method == "addTrackAudioUnit") {
-            let audioUnitId = (call.arguments as AnyObject)["id"] as! String
-            addTrackAudioUnit(audioUnitId) { result($0) }
+        case "normalizeAssetDir":
+            guard let args = call.arguments as? [String: Any],
+                  let assetDir = args["assetDir"] as? String else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "assetDir is required", details: nil))
+                return
+            }
+            
+            // On iOS, we don't need to normalize the asset directory
+            result(assetDir)
+        case "listAudioUnits":
+            listAudioUnits { audioUnits in
+                result(audioUnits)
+            }
+        case "setupEngine":
+            setupEngine(sampleRateCallbackPort: 0)
+            if let engine = plugin.engine {
+                let sampleRate = Int(AVAudioEngine().outputNode.outputFormat(forBus: 0).sampleRate)
+                result(sampleRate)
+            } else {
+                result(FlutterError(code: "ENGINE_ERROR", message: "Failed to set up engine", details: nil))
+            }
+        case "addTrackSf2":
+            guard let args = call.arguments as? [String: Any],
+                  let path = args["path"] as? String,
+                  let isAsset = args["isAsset"] as? Bool else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "Invalid arguments", details: nil))
+                return
+            }
+            
+            let presetIndex = args["presetIndex"] as? Int ?? 0
+            
+            plugin.engine!.addTrackSf2(sf2Path: path, isAsset: isAsset, presetIndex: Int32(presetIndex)) { trackId in
+                result(Int(trackId))
+            }
+        case "play":
+            enginePlay()
+            result(nil)
+        case "pause":
+            enginePause()
+            result(nil)
+        default:
+            result(FlutterMethodNotImplemented)
         }
     }
 }
@@ -64,6 +102,11 @@ func listAudioUnits(completion: @escaping ([String]) -> Void) {
     }
 }
 
+// Called from method channel
+func setupEngine() -> Int {
+    plugin.engine = CocoaEngine(sampleRateCallbackPort: 0, registrar: plugin.registrar)
+    return Int(AVAudioEngine().outputNode.outputFormat(forBus: 0).sampleRate)
+}
 
 @_cdecl("setup_engine")
 func setupEngine(sampleRateCallbackPort: Dart_Port) {
@@ -138,6 +181,8 @@ func handleEventsNow(trackIndex: track_index_t, eventData: UnsafePointer<UInt8>,
     rawEventDataToEvents(eventData, eventsCount, events)
     
     SchedulerHandleEventsNow(plugin.engine!.scheduler, trackIndex, UnsafePointer(events), eventsCount)
+    
+    events.deallocate()
 }
 
 @_cdecl("schedule_events")
@@ -146,7 +191,11 @@ func scheduleEvents(trackIndex: track_index_t, eventData: UnsafePointer<UInt8>, 
     
     rawEventDataToEvents(eventData, eventsCount, events)
     
-    return SchedulerAddEvents(plugin.engine!.scheduler, trackIndex, UnsafePointer(events), eventsCount)
+    let result = SchedulerAddEvents(plugin.engine!.scheduler, trackIndex, UnsafePointer(events), eventsCount)
+    
+    events.deallocate()
+    
+    return result
 }
 
 @_cdecl("clear_events")
@@ -162,4 +211,10 @@ func enginePlay() {
 @_cdecl("engine_pause")
 func enginePause() {
     plugin.engine!.pause()
+}
+
+// Defining external C functions to avoid duplicate symbols
+@_cdecl("RegisterDart_PostCObject")
+func RegisterDart_PostCObject(_dartPostCObject: Dart_PostCObjectType) {
+    Dart_PostCObject_DL = _dartPostCObject
 }
