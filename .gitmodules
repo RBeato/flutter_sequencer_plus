@@ -11,3 +11,6 @@
 	path = android/third_party/libnyquist
 	url = https://github.com/mikeperri/libnyquist.git
 	branch = fix-wavpack-int-lossy
+[submodule "example/android/third_party/sfizz"]
+	path = example/android/third_party/sfizz
+	url = https://github.com/sfztools/sfizz
