@@ -332,3 +332,4 @@ bug or by tackling one of these to-do items.
 	- Can be used to add some key effects like reverb, delay, and compression
 	- Supports audio input, writing output to file, and other DAW stuff
 - Support Web
+# flutter_sequencer_plus
