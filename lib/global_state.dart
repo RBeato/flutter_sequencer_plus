@@ -122,7 +122,9 @@ class GlobalState {
   void _setupEngine() async {
     sampleRate = await NativeBridge.doSetup();
     isEngineReady = true;
-    onEngineReadyCallbacks.forEach((callback) => callback());
+    for (var callback in onEngineReadyCallbacks) {
+      callback();
+    }
 
     if (keepEngineRunning) {
       NativeBridge.play();
@@ -138,10 +140,12 @@ class GlobalState {
     if (!keepEngineRunning) NativeBridge.play();
 
     if (_topOffTimer != null) _topOffTimer!.cancel();
-    _topOffTimer = Timer.periodic(Duration(milliseconds: 1000), (_) {
+    _topOffTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) {
       _topOffAllBuffers();
 
-      sequenceIdMap.values.forEach((sequence) => sequence.checkIsOver());
+      for (var sequence in sequenceIdMap.values) {
+        sequence.checkIsOver();
+      }
     });
   }
 

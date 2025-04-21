@@ -36,11 +36,11 @@ abstract class SchedulerEvent {
 /// Describes an event that will trigger a MIDI event.
 class MidiEvent extends SchedulerEvent {
   MidiEvent({
-    required double beat,
+    required super.beat,
     required this.midiStatus,
     required this.midiData1,
     required this.midiData2,
-  }) : super(beat: beat, type: SchedulerEvent.MIDI_EVENT);
+  }) : super(type: SchedulerEvent.MIDI_EVENT);
 
   final int midiStatus;
   final int midiData1;
@@ -62,8 +62,9 @@ class MidiEvent extends SchedulerEvent {
     required int noteNumber,
     required int velocity,
   }) {
-    if (noteNumber > 127 || noteNumber < 0)
+    if (noteNumber > 127 || noteNumber < 0) {
       throw 'noteNumber must be in range 0-127';
+    }
     if (velocity > 127 || velocity < 0) throw 'Velocity must be in range 0-127';
 
     return MidiEvent(
@@ -78,8 +79,9 @@ class MidiEvent extends SchedulerEvent {
     required double beat,
     required int noteNumber,
   }) {
-    if (noteNumber > 127 || noteNumber < 0)
+    if (noteNumber > 127 || noteNumber < 0) {
       throw 'noteNumber must be in range 0-127';
+    }
 
     return MidiEvent(
       beat: beat,
@@ -127,9 +129,9 @@ class MidiEvent extends SchedulerEvent {
 /// Describes an event that will trigger a volume change.
 class VolumeEvent extends SchedulerEvent {
   VolumeEvent({
-    required double beat,
+    required super.beat,
     required this.volume,
-  }) : super(beat: beat, type: SchedulerEvent.VOLUME_EVENT);
+  }) : super(type: SchedulerEvent.VOLUME_EVENT);
 
   final double? volume;
 

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_sequencer/track.dart';
 
-import 'package:flutter_sequencer_example/models/step_sequencer_state.dart';
+import '../../models/step_sequencer_state.dart';
 
 import 'volume_slider.dart';
 import 'grid/grid.dart';

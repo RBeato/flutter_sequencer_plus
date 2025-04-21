@@ -14,11 +14,15 @@ A new flutter plugin project.
   s.author           = { 'Your Company' => 'email@example.com' }
   s.source           = { :path => '.' }
   s.source_files = 'Classes/**/*'
+  s.public_header_files = 'Classes/*.h'
+  s.header_mappings_dir = 'Classes'
   s.resource_bundles = {
     'flutter_sequencer' => ['prepare.sh']
   }
+  # TODO: Verify module.modulemap and C API bridge (EngineBindings.h/cpp) exposure for Swift/ObjC interop
   s.xcconfig = {
-    'USER_HEADER_SEARCH_PATHS' => '"${PROJECT_DIR}/.."/Classes/CallbackManager/*,"${PROJECT_DIR}/.."/Classes/Scheduler/*,"${PROJECT_DIR}/.."/Classes/AudioUnit/Sfizz/SfizzDSPKernelAdapter.h',
+    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++2a',
+    'CLANG_CXX_LIBRARY' => 'libc++'
   }
   s.dependency 'Flutter'
   s.static_framework = true
@@ -29,16 +33,14 @@ A new flutter plugin project.
     'DEFINES_MODULE' => 'YES',
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64,i386',
     'ENABLE_TESTABILITY' => 'YES',
-    'STRIP_STYLE' => 'non-global',
-    'HEADER_SEARCH_PATHS' => '$(PODS_TARGET_SRCROOT)/third_party/sfizz/src'
+    'STRIP_STYLE' => 'non-global'
   }
   s.user_target_xcconfig = { 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64' }
   s.swift_version = '5.0'
   s.library = 'c++'
-  s.xcconfig = {
-    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++2a',
-    'CLANG_CXX_LIBRARY' => 'libc++'
-  }
   s.prepare_command = './prepare.sh'
   s.vendored_libraries = 'third_party/sfizz/build/libsfizz_fat.a'
+  s.module_map = 'Classes/module.modulemap'
+  s.frameworks = 'AudioUnit', 'AVFoundation', 'CoreAudio'
+  # After editing, validate with: pod lib lint flutter_sequencer.podspec
 end

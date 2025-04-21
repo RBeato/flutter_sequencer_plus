@@ -1,4 +1,4 @@
-import 'package:flutter_sequencer_example/constants.dart';
+import '../constants.dart';
 
 import 'step_sequencer_state.dart';
 

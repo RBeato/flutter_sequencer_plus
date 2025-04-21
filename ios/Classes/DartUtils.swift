@@ -1,4 +1,5 @@
 import Foundation
+@_implementationOnly import flutter_sequencer
 
 func scan<
   S : Sequence, U

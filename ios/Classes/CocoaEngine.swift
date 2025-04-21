@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+@_implementationOnly import flutter_sequencer
 
 public class CocoaEngine {
     var scheduler: UnsafeMutableRawPointer!
@@ -216,8 +217,9 @@ public class CocoaEngine {
             return path
         } else {
             let key = registrar.lookupKey(forAsset: path)
-            let bundlePath = Bundle.main.path(forResource: key, ofType: nil)
-            
+            // iOS 17+ and framework compatibility: use the bundle for this class
+            let bundle = Bundle(for: type(of: self))
+            let bundlePath = bundle.path(forResource: key, ofType: nil) ?? Bundle.main.path(forResource: key, ofType: nil)
             if let bundlePath = bundlePath {
                 return bundlePath
             } else {

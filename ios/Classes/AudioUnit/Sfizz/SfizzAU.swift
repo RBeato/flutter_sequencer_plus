@@ -1,5 +1,5 @@
 /*
-See LICENSE folder for this sample’s licensing information.
+See LICENSE folder for this sample's licensing information.
 
 Abstract:
 An AUAudioUnit subclass implementing a low-pass filter with resonance.
@@ -9,6 +9,7 @@ import Foundation
 import AudioToolbox
 import AVFoundation
 import CoreAudioKit
+@_implementationOnly import flutter_sequencer
 
 public class SfizzAU: AUAudioUnit {
 

@@ -1,17 +1,15 @@
-import org.eclipse.jgit.api.Git
-
 group 'com.michaeljperri.flutter_sequencer'
 version '1.0-SNAPSHOT'
 
 buildscript {
-    ext.kotlin_version = '1.5.21'
+    ext.kotlin_version = '1.8.22'
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        classpath 'com.android.tools.build:gradle:4.1.2'
+        classpath 'com.android.tools.build:gradle:8.1.2'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
         classpath "org.eclipse.jgit:org.eclipse.jgit:5.12.0+"
     }
@@ -20,6 +18,7 @@ buildscript {
 rootProject.allprojects {
     repositories {
         google()
+        mavenCentral()
     }
 }
 
@@ -27,13 +26,14 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
 android {
-    compileSdkVersion 29
+    namespace 'com.michaeljperri.flutter_sequencer'
+    compileSdkVersion 34
 
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
     }
     defaultConfig {
-        minSdkVersion 16
+        minSdkVersion 21
 
         externalNativeBuild {
             cmake {
@@ -44,42 +44,18 @@ android {
     lintOptions {
         disable 'InvalidPackage'
     }
-    ndkVersion "22.1.7171670"
+    ndkVersion "25.2.9519653"
     externalNativeBuild {
         cmake {
-            version "3.18.1"
+            version "3.22.1"
             path "CMakeLists.txt"
         }
     }
-}
 
-void cloneThirdPartyRepo(String name, String uri, String commit) {
-    def dirPath = "$projectDir/third_party/$name"
-    def dir = new File(dirPath)
-
-    if (!dir.exists()) {
-        dir.mkdirs()
-        def repo =
-            Git.cloneRepository()
-                .setDirectory(dir)
-                .setURI(uri)
-                .setRemote('origin')
-                .setCloneSubmodules(true)
-                .call()
-
-        repo.checkout().setName(commit).call()
-        repo.submoduleUpdate()
-        repo.submoduleInit()
+    kotlinOptions {
+        jvmTarget = "1.8"
     }
 }
-
-task cloneThirdPartyRepos {
-    cloneThirdPartyRepo('oboe', 'https://github.com/google/oboe', '06ec23e4f6bc00ba7eea9b84e299f9200a598838')
-    cloneThirdPartyRepo('TinySoundFont', 'https://github.com/schellingb/TinySoundFont.git', 'bf574519e601202c3a9d27a74f345921277eed39')
-    cloneThirdPartyRepo('sfizz', 'https://github.com/sfztools/sfizz.git', 'fc1f0451cebd8996992cbc4f983fcf76b03295c5')
-}
-
-preBuild.dependsOn cloneThirdPartyRepos
 
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"

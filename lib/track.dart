@@ -37,9 +37,10 @@ class Track {
         final normalizedSfzDir =
             await NativeBridge.normalizeAssetDir(sfzFile.parent.path);
 
-        if (normalizedSfzDir == null)
+        if (normalizedSfzDir == null) {
           throw Exception(
               'Could not normalize asset dir for ${sfzFile.parent.path}');
+        }
         normalizedSfzPath = '$normalizedSfzDir/${p.basename(sfzFile.path)}';
       } else {
         normalizedSfzPath = sfzFile.path;
@@ -55,9 +56,10 @@ class Track {
         normalizedSampleRoot =
             await NativeBridge.normalizeAssetDir(instrument.sampleRoot);
 
-        if (normalizedSampleRoot == null)
+        if (normalizedSampleRoot == null) {
           throw Exception(
               'Could not normalize asset dir for ${instrument.sampleRoot}');
+        }
       } else {
         normalizedSampleRoot = instrument.sampleRoot;
       }
@@ -361,10 +363,10 @@ class Track {
     } else {
       // Beats are the same
 
-      if (eventA is VolumeEvent && !(eventB is VolumeEvent)) {
+      if (eventA is VolumeEvent && eventB is! VolumeEvent) {
         // Volume should come before anything else
         return -1;
-      } else if (eventB is VolumeEvent && !(eventA is VolumeEvent)) {
+      } else if (eventB is VolumeEvent && eventA is! VolumeEvent) {
         return 1;
       } else if (eventA is MidiEvent && eventB is MidiEvent) {
         // Note off should come before note on if the note is the same

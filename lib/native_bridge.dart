@@ -180,12 +180,12 @@ class NativeBridge {
       int sampleRate, double tempo) {
     if (events.isEmpty) return 0;
 
-    final Pointer<Uint8>? nativeArray =
+    final Pointer<Uint8> nativeArray =
         calloc<Uint8>(events.length * SCHEDULER_EVENT_SIZE);
     events.asMap().forEach((eventIndex, e) {
       final byteData = e.serializeBytes(sampleRate, tempo, 0);
       for (var byteIndex = 0; byteIndex < byteData.lengthInBytes; byteIndex++) {
-        nativeArray![eventIndex * SCHEDULER_EVENT_SIZE + byteIndex] =
+        nativeArray[eventIndex * SCHEDULER_EVENT_SIZE + byteIndex] =
             byteData.getUint8(byteIndex);
       }
     });
@@ -197,12 +197,12 @@ class NativeBridge {
       int sampleRate, double tempo, int frameOffset) {
     if (events.isEmpty) return 0;
 
-    final Pointer<Uint8>? nativeArray =
+    final Pointer<Uint8> nativeArray =
         calloc<Uint8>(events.length * SCHEDULER_EVENT_SIZE);
     events.asMap().forEach((eventIndex, e) {
       final byteData = e.serializeBytes(sampleRate, tempo, frameOffset);
       for (var byteIndex = 0; byteIndex < byteData.lengthInBytes; byteIndex++) {
-        nativeArray![eventIndex * SCHEDULER_EVENT_SIZE + byteIndex] =
+        nativeArray[eventIndex * SCHEDULER_EVENT_SIZE + byteIndex] =
             byteData.getUint8(byteIndex);
       }
     });

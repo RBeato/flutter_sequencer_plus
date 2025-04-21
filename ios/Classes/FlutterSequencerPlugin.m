@@ -1,8 +1,8 @@
-#import "./CallbackManager/CallbackManager.h"
-#import "./CocoaScheduler/CocoaScheduler.h"
-#import "./Scheduler/BaseScheduler.h"
-#import "./Scheduler/SchedulerEvent.h"
-#import "./AudioUnit/Sfizz/SfizzDSPKernelAdapter.h"
+#import "CallbackManager.h"
+#import "CocoaScheduler.h"
+#import "BaseScheduler.h"
+#import "SchedulerEvent.h"
+#import "SfizzDSPKernelAdapter.h"
 
 #import "FlutterSequencerPlugin.h"
 #if __has_include(<flutter_sequencer/flutter_sequencer-Swift.h>)

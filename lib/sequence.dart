@@ -29,7 +29,9 @@ class Sequence {
   /// Call this to remove this sequence and its tracks from the global sequencer
   /// engine.
   void destroy() {
-    _tracks.values.forEach((track) => deleteTrack(track));
+    for (var track in _tracks.values) {
+      deleteTrack(track);
+    }
     globalState.unregisterSequence(this);
   }
 
@@ -78,10 +80,10 @@ class Sequence {
       }
     });
 
-    keysToRemove.forEach((key) {
+    for (var key in keysToRemove) {
       NativeBridge.removeTrack(key);
       _tracks.remove(key);
-    });
+    }
 
     return _tracks.values.toList();
   }
@@ -103,9 +105,9 @@ class Sequence {
   void pause() {
     if (!globalState.isEngineReady) return;
 
-    _tracks.values.forEach((track) {
+    for (var track in _tracks.values) {
       NativeBridge.resetTrack(track.id);
-    });
+    }
     globalState.pauseSequence(id);
   }
 
@@ -113,11 +115,11 @@ class Sequence {
   void stop() {
     pause();
     setBeat(0.0);
-    _tracks.values.forEach((track) {
+    for (var track in _tracks.values) {
       List.generate(128, (noteNumber) {
         track.stopNoteNow(noteNumber: noteNumber);
       });
-    });
+    }
   }
 
   /// Sets the tempo.
@@ -194,9 +196,9 @@ class Sequence {
   void setBeat(double beat) {
     if (!globalState.isEngineReady) return;
 
-    _tracks.values.forEach((track) {
+    for (var track in _tracks.values) {
       NativeBridge.resetTrack(track.id);
-    });
+    }
 
     final leadFrames =
         getIsPlaying() ? min(_getFramesRendered(), LEAD_FRAMES) : 0;

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flutter_sequencer_example/constants.dart';
+import '../../../constants.dart';
 
 class Cell extends StatelessWidget {
   Cell({

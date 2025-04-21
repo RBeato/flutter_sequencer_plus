@@ -1,0 +1,6 @@
+module flutter_sequencer [system] {
+    header "CallbackManager.h"
+    header "CocoaScheduler.h"
+    header "SchedulerEvent.h"
+    export *
+} 
