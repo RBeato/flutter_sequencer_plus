@@ -16,6 +16,12 @@ const val flutterAssetRoot = "flutter_assets"
 
 /** FlutterSequencerPlugin */
 class FlutterSequencerPlugin : FlutterPlugin, MethodCallHandler {
+    companion object {
+        init {
+            System.loadLibrary("flutter_sequencer")
+        }
+    }
+
     private lateinit var channel: MethodChannel
     private lateinit var context: Context
 
