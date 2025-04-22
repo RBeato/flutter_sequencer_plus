@@ -7,6 +7,6 @@
 /build
 /captures
 /.cxx
-/third_party
+# /third_party
 !/third_party/sfizz
 !/third_party/oboe
