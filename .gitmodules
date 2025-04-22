@@ -1,6 +1,3 @@
-[submodule "android/third_party/oboe"]
-	path = android/third_party/oboe
-	url = https://github.com/google/oboe
 [submodule "android/third_party/TinySoundFont"]
 	path = android/third_party/TinySoundFont
 	url = https://github.com/schellingb/TinySoundFont.git
@@ -11,6 +8,4 @@
 	path = android/third_party/libnyquist
 	url = https://github.com/mikeperri/libnyquist.git
 	branch = fix-wavpack-int-lossy
-[submodule "android/third_party/sfizz"]
-    path = android/third_party/sfizz
-    url = https://github.com/sfztools/sfizz
+
