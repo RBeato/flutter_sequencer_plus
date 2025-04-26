@@ -1,6 +1,6 @@
 PODS:
   - Flutter (1.0.0)
-  - flutter_sequencer (0.0.2):
+  - flutter_sequencer (0.1.0):
     - Flutter
 
 DEPENDENCIES:
@@ -15,7 +15,7 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
-  flutter_sequencer: 141a9141d3a0fa36544eb3a60c7a48f868335c7c
+  flutter_sequencer: 06af0c548f415b078bac3edd68151f0babd66b55
 
 PODFILE CHECKSUM: 7d2fd379982b031b04ec8e79125f5d6ca4f4e94d
 
