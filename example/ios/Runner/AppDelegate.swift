@@ -1,6 +1,5 @@
-import Flutter
 import UIKit
-import flutter_sequencer
+import Flutter
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -8,10 +7,9 @@ import flutter_sequencer
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    // Manual plugin registration in Swift
-    let registry = self.registrar(forPlugin: "FlutterSequencerPlugin")
-    SwiftFlutterSequencerPlugin.register(with: registry!)
-    
+    // Just call the generated registrant:
+    GeneratedPluginRegistrant.register(with: self)
+
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 }
