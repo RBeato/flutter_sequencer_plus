@@ -3,7 +3,6 @@ import Foundation
 import AudioToolbox
 import CoreAudio
 import AVFoundation
-@_implementationOnly import flutter_sequencer
 
 var plugin: SwiftFlutterSequencerPlugin!
 
@@ -51,9 +50,8 @@ public class SwiftFlutterSequencerPlugin: NSObject, FlutterPlugin {
 // Called from method channel
 func normalizeAssetDir(registrar: FlutterPluginRegistrar, assetDir: String) -> String? {
     let key = registrar.lookupKey(forAsset: assetDir)
-    // iOS 17+ and framework compatibility: use the bundle for this class
-    let bundle = Bundle(for: SwiftFlutterSequencerPlugin.self)
-    let path = bundle.path(forResource: key, ofType: nil) ?? Bundle.main.path(forResource: key, ofType: nil)
+    let path = Bundle.main.path(forResource: key, ofType: nil)
+    
     return path
 }
 

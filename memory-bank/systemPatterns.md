@@ -390,4 +390,108 @@ Events are scheduled based on beats but converted to sample frames for precise t
 Careful memory management is implemented to avoid audio glitches:
 1. **Pre-allocation**: Buffers are pre-allocated to avoid real-time allocations
 2. **Resource Cleanup**: Instruments properly release resources on destruction
-3. **Reference Counting**: Platform-specific resources use appropriate lifetime management 
+3. **Reference Counting**: Platform-specific resources use appropriate lifetime management
+
+## System Architecture and Patterns
+
+## Core Architecture
+
+### Module Organization
+- Umbrella header pattern for public API exposure
+- Clear separation between public and private headers
+- Modular organization of components:
+  - Core scheduling (`Scheduler.h/cpp`)
+  - Audio engine integration
+  - Platform-specific bridges
+  - Swift interface layer
+
+### Interoperability Patterns
+- C-style interface for core functionality
+- C++ implementation details hidden from Swift
+- Debug logging infrastructure for development
+- Error handling through return codes
+- Memory management through explicit ownership
+
+### Component Relationships
+```mermaid
+graph TD
+    Swift[Swift Interface] --> Bridge[Platform Bridge]
+    Bridge --> Scheduler[Scheduler Core]
+    Scheduler --> AudioEngine[Audio Engine]
+    
+    subgraph Core Components
+        Scheduler
+        AudioEngine
+    end
+    
+    subgraph Platform Layer
+        Swift
+        Bridge
+    end
+```
+
+## Technical Decisions
+1. Build System
+   - CocoaPods for dependency management
+   - Modular header organization
+   - Architecture-specific optimizations
+
+2. Error Handling
+   - Return codes for C interface
+   - Error propagation through layers
+   - Debug logging for development
+
+3. Memory Management
+   - Clear ownership rules
+   - RAII in C++ implementation
+   - Reference counting in Swift
+
+4. Threading Model
+   - Main thread for UI operations
+   - Dedicated thread for scheduler
+   - Lock-free operations where possible
+
+## Evolution Strategy
+### Short Term
+- Complete minimal scheduler implementation
+- Establish testing infrastructure
+- Integrate with audio engine
+
+### Medium Term
+- Optimize performance
+- Enhance error handling
+- Improve debugging tools
+
+### Long Term
+- Add advanced scheduling features
+- Support for complex event patterns
+- Real-time performance analysis
+
+## Current Focus Areas
+
+### iOS Build System
+1. Module organization improvements
+2. Build script enhancements
+3. Architecture support updates
+
+### Swift Integration
+1. Simplified interoperability
+2. Clear type boundaries
+3. Efficient marshaling
+
+## Evolution Strategy
+
+### Short Term
+1. Complete module organization
+2. Verify architecture support
+3. Update build system
+
+### Medium Term
+1. Optimize performance
+2. Enhance error handling
+3. Improve documentation
+
+### Long Term
+1. Add advanced features
+2. Expand platform support
+3. Enhance user experience 

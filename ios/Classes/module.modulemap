@@ -1,6 +1,6 @@
-module flutter_sequencer [system] {
-    header "CallbackManager.h"
-    header "CocoaScheduler.h"
-    header "SchedulerEvent.h"
+framework module flutter_sequencer {
+    umbrella header "FlutterSequencerUmbrella.h"
     export *
-} 
+    link "c++"
+    module * { export * }
+}

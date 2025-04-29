@@ -4,43 +4,35 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'flutter_sequencer'
-  s.version          = '0.0.2'
-  s.summary          = 'A new flutter plugin project.'
-  s.description      = <<-DESC
-A new flutter plugin project.
-                       DESC
-  s.homepage         = 'http://example.com'
+  s.version          = '0.1.0'
+  s.summary          = 'A Flutter plugin for audio sequencing and synthesis'
+  s.description      = 'A Flutter plugin that provides audio sequencing and synthesis capabilities using native platform implementations.'
+  s.homepage         = 'https://github.com/rbsou/flutter_sequencer_plus'
   s.license          = { :file => '../LICENSE' }
-  s.author           = { 'Your Company' => 'email@example.com' }
+  s.author           = { 'Mike Perri' => 'mikep@hey.com', 'Rodrigo Souza' => 'rbsou@hey.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*'
-  s.public_header_files = 'Classes/*.h'
+  
+  # Include ALL native files, including .hpp
+  s.source_files     = 'Classes/**/*.{swift,h,m,mm,cpp,c,hpp}'
+  s.public_header_files = 'Classes/**/*.h', 'Classes/**/*.hpp'
+  s.module_map = 'Classes/module.modulemap'
   s.header_mappings_dir = 'Classes'
-  s.resource_bundles = {
-    'flutter_sequencer' => ['prepare.sh']
-  }
-  # TODO: Verify module.modulemap and C API bridge (EngineBindings.h/cpp) exposure for Swift/ObjC interop
-  s.xcconfig = {
-    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++2a',
-    'CLANG_CXX_LIBRARY' => 'libc++'
-  }
+  
   s.dependency 'Flutter'
-  s.static_framework = true
-  s.platform = :ios, '12.0'
+  s.platform = :ios, '13.0'
 
-  # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
-    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64,i386',
-    'ENABLE_TESTABILITY' => 'YES',
-    'STRIP_STYLE' => 'non-global'
+    'VALID_ARCHS' => 'arm64 arm64e x86_64',
+    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
+    'SWIFT_VERSION' => '5.0',
+    'HEADER_SEARCH_PATHS' => '$(PODS_TARGET_SRCROOT)/../third_party/sfizz/src'
   }
-  s.user_target_xcconfig = { 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64' }
+  
   s.swift_version = '5.0'
-  s.library = 'c++'
-  s.prepare_command = './prepare.sh'
-  s.vendored_libraries = 'third_party/sfizz/build/libsfizz_fat.a'
-  s.module_map = 'Classes/module.modulemap'
-  s.frameworks = 'AudioUnit', 'AVFoundation', 'CoreAudio'
-  # After editing, validate with: pod lib lint flutter_sequencer.podspec
+  s.frameworks = 'Foundation', 'AVFoundation', 'AudioToolbox'
+
+  s.user_target_xcconfig = {
+    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386'
+  }
 end
