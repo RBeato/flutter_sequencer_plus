@@ -9,7 +9,7 @@ import Flutter
   ) -> Bool {
     // Just call the generated registrant:
     GeneratedPluginRegistrant.register(with: self)
-
+    
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 }
