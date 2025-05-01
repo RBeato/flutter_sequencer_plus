@@ -1,6 +1,0 @@
-framework module flutter_sequencer {
-    umbrella header "FlutterSequencerUmbrella.h"
-    export *
-    link "c++"
-    module * { export * }
-}
