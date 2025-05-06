@@ -61,7 +61,7 @@ void BaseScheduler::resetTrack(track_index_t trackIndex) {
         events[noteNumber].data[1] = noteNumber;
         events[noteNumber].data[2] = 0;
     }
-    handleEventsNow(trackIndex, (const SchedulerEvent*)events, 128);
+    handleEventsNow(trackIndex, std::as_const(events), 128);
 
     onResetTrack(trackIndex);
 }

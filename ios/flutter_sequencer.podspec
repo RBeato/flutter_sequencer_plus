@@ -11,28 +11,31 @@ Pod::Spec.new do |s|
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Mike Perri' => 'mikep@hey.com', 'Rodrigo Souza' => 'rbsou@hey.com' }
   s.source           = { :path => '.' }
-  
-  # Include ALL native files, including .hpp
-  s.source_files     = 'Classes/**/*.{swift,h,m,mm,cpp,c,hpp}'
-  s.public_header_files = 'Classes/**/*.h', 'Classes/**/*.hpp'
-  s.module_map = 'Classes/module.modulemap'
-  s.header_mappings_dir = 'Classes'
-  
+  s.source_files = 'Classes/**/*'
+  s.resource_bundles = {
+    'flutter_sequencer' => ['prepare.sh']
+  }
+  s.xcconfig = {
+    'USER_HEADER_SEARCH_PATHS' => '"${PROJECT_DIR}/.."/Classes/CallbackManager/*,"${PROJECT_DIR}/.."/Classes/Scheduler/*,"${PROJECT_DIR}/.."/Classes/AudioUnit/Sfizz/SfizzDSPKernelAdapter.h',
+  }
   s.dependency 'Flutter'
-  s.platform = :ios, '13.0'
+  s.static_framework = true
+  s.platform = :ios, '12.0'
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
-    'VALID_ARCHS' => 'arm64 arm64e x86_64',
-    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
-    'SWIFT_VERSION' => '5.0',
-    'HEADER_SEARCH_PATHS' => '$(PODS_TARGET_SRCROOT)/../third_party/sfizz/src'
+    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64,i386',
+    'ENABLE_TESTABILITY' => 'YES',
+    'STRIP_STYLE' => 'non-global',
+    'HEADER_SEARCH_PATHS' => '$(PODS_TARGET_SRCROOT)/third_party/sfizz/src'
   }
-  
+  s.user_target_xcconfig = { 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64' }
   s.swift_version = '5.0'
-  s.frameworks = 'Foundation', 'AVFoundation', 'AudioToolbox'
-
-  s.user_target_xcconfig = {
-    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386'
+  s.library = 'c++'
+  s.xcconfig = {
+    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++2a',
+    'CLANG_CXX_LIBRARY' => 'libc++'
   }
+  s.prepare_command = './prepare.sh'
+  s.vendored_libraries = 'third_party/sfizz/build/libsfizz_fat.a'
 end
