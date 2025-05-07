@@ -26,35 +26,80 @@ fi
 
 cd sfizz
 
-# Create empty static libraries as placeholders
-if [ ! -f "build/libsfizz_fat.a" ]; then
-    echo "Creating empty libsfizz_fat.a for compatibility..."
-    mkdir -p build/empty_obj
-    cd build/empty_obj
-    
-    # Create a simple C file with necessary symbols
-    cat > placeholder.c << EOF
-void sfizz_placeholder() {}
-EOF
-    
-    # Compile for device (arm64)
-    xcrun --sdk iphoneos clang -arch arm64 -c placeholder.c -o placeholder_arm64.o
-    
-    # Compile for simulator (x86_64)
-    xcrun --sdk iphonesimulator clang -arch x86_64 -c placeholder.c -o placeholder_x86_64.o
-    
-    # Create the libraries for each architecture
-    xcrun --sdk iphoneos ar rcs ../libsfizz_iphoneos.a placeholder_arm64.o
-    xcrun --sdk iphonesimulator ar rcs ../libsfizz_iphonesimulator.a placeholder_x86_64.o
-    
-    # Create a fat binary
-    xcrun lipo -create ../libsfizz_iphoneos.a ../libsfizz_iphonesimulator.a -output ../libsfizz_fat.a
-    
-    cd ..
-    echo "Created placeholder library at $(pwd)/libsfizz_fat.a"
-    ls -la libsfizz_fat.a
-else
-    echo "Library build/libsfizz_fat.a already exists"
-fi
+# This script creates an XCFramework from all required static libraries for sfizz
+# for both iOS device and simulator architectures.
+
+# List of all static libraries to include in the XCFramework
+LIBS=(
+  libsfizz.a
+  libsfizz_import.a
+  libsfizz_internal.a
+  libsfizz_fmidi.a
+  libsfizz_hiir_polyphase_iir2designer.a
+  libst_audiofile.a
+  libst_audiofile_formats.a
+  libsfizz_pugixml.a
+  libsfizz_parser.a
+  libsfizz_filesystem_impl.a
+  libabsl_cord.a
+  libsfizz_tunings.a
+  libsfizz_spin_mutex.a
+  libsfizz_messaging.a
+  libabsl_raw_hash_set.a
+  libsfizz_cpuid.a
+  libsfizz_cephes.a
+  libsfizz_kissfft.a
+  libsfizz_spline.a
+  libabsl_cordz_info.a
+  libwavpack.a
+  libabsl_cord_internal.a
+  libaiff.a
+  libabsl_hash.a
+  libabsl_hashtablez_sampler.a
+  libabsl_cordz_handle.a
+  libabsl_bad_optional_access.a
+  libabsl_bad_variant_access.a
+  libabsl_cordz_functions.a
+  libabsl_synchronization.a
+  libabsl_low_level_hash.a
+  libabsl_city.a
+  libabsl_crc_cord_state.a
+  libabsl_graphcycles_internal.a
+  libabsl_crc32c.a
+  libabsl_exponential_biased.a
+  libabsl_str_format_internal.a
+  libabsl_kernel_timeout_internal.a
+  libabsl_symbolize.a
+  libabsl_time.a
+  libabsl_time_zone.a
+  libabsl_stacktrace.a
+  libabsl_debugging_internal.a
+  libabsl_demangle_internal.a
+  libabsl_crc_internal.a
+  libabsl_malloc_internal.a
+  libabsl_civil_time.a
+  libabsl_strings.a
+  libabsl_crc_cpu_detect.a
+  libabsl_string_view.a
+  libabsl_strings_internal.a
+  libabsl_throw_delegate.a
+  libabsl_base.a
+  libabsl_raw_logging_internal.a
+  libabsl_int128.a
+  libabsl_log_severity.a
+  libabsl_spinlock_wait.a
+)
+
+rm -rf xcframeworks
+mkdir -p xcframeworks
+
+for LIB in "${LIBS[@]}"; do
+  xcodebuild -create-xcframework \
+    -library build-ios/library/lib/$LIB \
+    -library build-ios-sim/library/lib/$LIB \
+    -output xcframeworks/${LIB%.a}.xcframework
+done
+
+echo "Created individual XCFrameworks for all static libraries."
 
 echo "prepare.sh script completed successfully"

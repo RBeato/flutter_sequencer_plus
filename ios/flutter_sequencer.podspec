@@ -8,7 +8,7 @@ Pod::Spec.new do |s|
   s.summary          = 'A Flutter plugin for audio sequencing and synthesis'
   s.description      = 'A Flutter plugin that provides audio sequencing and synthesis capabilities using native platform implementations.'
   s.homepage         = 'https://github.com/rbsou/flutter_sequencer_plus'
-  s.license          = { :file => '../LICENSE' }
+  s.license          = { :type => 'MIT', :file => '../LICENSE' }
   s.author           = { 'Mike Perri' => 'mikep@hey.com', 'Rodrigo Souza' => 'rbsou@hey.com' }
   s.source           = { :path => '.' }
   s.source_files = 'Classes/**/*'
@@ -20,7 +20,7 @@ Pod::Spec.new do |s|
   }
   s.dependency 'Flutter'
   s.static_framework = true
-  s.platform = :ios, '12.0'
+  s.platform = :ios, '13.0'
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
@@ -37,5 +37,5 @@ Pod::Spec.new do |s|
     'CLANG_CXX_LIBRARY' => 'libc++'
   }
   s.prepare_command = './prepare.sh'
-  s.vendored_libraries = 'third_party/sfizz/build/libsfizz_fat.a'
+  s.vendored_frameworks = Dir['third_party/sfizz/xcframeworks/*.xcframework']
 end
