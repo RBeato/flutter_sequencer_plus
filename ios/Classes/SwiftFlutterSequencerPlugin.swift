@@ -43,6 +43,23 @@ public class SwiftFlutterSequencerPlugin: NSObject, FlutterPlugin {
         } else if (call.method == "addTrackAudioUnit") {
             let audioUnitId = (call.arguments as AnyObject)["id"] as! String
             addTrackAudioUnit(audioUnitId) { result($0) }
+        } else if (call.method == "initializeAudioSession") {
+            initializeAudioSession(result)
+        }
+    }
+    
+    private func initializeAudioSession(_ result: @escaping FlutterResult) {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default)
+            try session.setActive(true)
+            print("Audio session initialized with playback category")
+            result(true)
+        } catch {
+            print("Failed to initialize audio session: \(error)")
+            result(FlutterError(code: "AUDIO_SESSION_ERROR", 
+                             message: error.localizedDescription, 
+                             details: nil))
         }
     }
 }

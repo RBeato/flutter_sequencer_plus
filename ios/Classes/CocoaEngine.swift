@@ -218,9 +218,23 @@ public class CocoaEngine {
             let key = registrar.lookupKey(forAsset: path)
             let bundlePath = Bundle.main.path(forResource: key, ofType: nil)
             
+            // Improved debugging - print information about asset loading
+            print("Asset lookup: path=\(path), key=\(key)")
+            
             if let bundlePath = bundlePath {
+                print("Asset found at: \(bundlePath)")
                 return bundlePath
             } else {
+                print("!!! ASSET NOT FOUND: \(path) !!!")
+                
+                // Try other search locations as fallback
+                let fileName = (path as NSString).lastPathComponent
+                let alternativePath = Bundle.main.path(forResource: fileName, ofType: nil)
+                if let alternativePath = alternativePath {
+                    print("Found in alternative location: \(alternativePath)")
+                    return alternativePath
+                }
+                
                 return nil
             }
         }

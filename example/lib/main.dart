@@ -5,6 +5,8 @@ import 'package:flutter_sequencer/models/sfz.dart';
 import 'package:flutter_sequencer/models/instrument.dart';
 import 'package:flutter_sequencer/sequence.dart';
 import 'package:flutter_sequencer/track.dart';
+import 'package:flutter/services.dart';
+import 'dart:io' show Platform;
 
 import 'components/drum_machine/drum_machine.dart';
 import 'components/position_view.dart';
@@ -16,8 +18,43 @@ import 'models/project_state.dart';
 import 'models/step_sequencer_state.dart';
 import 'constants.dart';
 
+void checkAsset() async {
+  try {
+    final sf2Data = await rootBundle.load('assets/sf2/TR-808.sf2');
+    print('Asset found! SF2 size: ${sf2Data.lengthInBytes} bytes');
+    
+    // Check filesystem paths to help debug native loading
+    if (Platform.isIOS) {
+      final sfzData = await rootBundle.load('assets/sfz/GMPiano.sfz');
+      final wavData = await rootBundle.load('assets/wav/D3.wav');
+      print('All assets found! SFZ size: ${sfzData.lengthInBytes}, WAV size: ${wavData.lengthInBytes}');
+    }
+  } catch (e) {
+    print('Asset NOT found: $e');
+  }
+}
+
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize audio session with proper settings
+  if (Platform.isIOS) {
+    print('Running on iOS ${Platform.operatingSystemVersion}');
+    _initAudioSession();
+  }
+  
   runApp(MyApp());
+}
+
+// Initialize proper audio session on iOS
+Future<void> _initAudioSession() async {
+  try {
+    const methodChannel = MethodChannel('flutter_sequencer');
+    await methodChannel.invokeMethod('initializeAudioSession');
+    print('Audio session initialized successfully');
+  } catch (e) {
+    print('Error initializing audio session: $e');
+  }
 }
 
 class MyApp extends StatefulWidget {
@@ -42,6 +79,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    checkAsset();
 
     GlobalState().setKeepEngineRunning(true);
 
