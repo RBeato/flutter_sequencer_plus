@@ -20,17 +20,21 @@ import 'constants.dart';
 
 void checkAsset() async {
   try {
+    print('[DEBUG] Checking asset: assets/sf2/TR-808.sf2');
     final sf2Data = await rootBundle.load('assets/sf2/TR-808.sf2');
-    print('Asset found! SF2 size: ${sf2Data.lengthInBytes} bytes');
-    
-    // Check filesystem paths to help debug native loading
-    if (Platform.isIOS) {
-      final sfzData = await rootBundle.load('assets/sfz/GMPiano.sfz');
-      final wavData = await rootBundle.load('assets/wav/D3.wav');
-      print('All assets found! SFZ size: ${sfzData.lengthInBytes}, WAV size: ${wavData.lengthInBytes}');
-    }
-  } catch (e) {
-    print('Asset NOT found: $e');
+    print('[DEBUG] Asset found: assets/sf2/TR-808.sf2, size: \\${sf2Data.lengthInBytes} bytes');
+    print('[DEBUG] Checking asset: assets/sf2/8bitsf.SF2');
+    final sf2Data2 = await rootBundle.load('assets/sf2/8bitsf.SF2');
+    print('[DEBUG] Asset found: assets/sf2/8bitsf.SF2, size: \\${sf2Data2.lengthInBytes} bytes');
+    print('[DEBUG] Checking asset: assets/sfz/GMPiano.sfz');
+    final sfzData = await rootBundle.load('assets/sfz/GMPiano.sfz');
+    print('[DEBUG] Asset found: assets/sfz/GMPiano.sfz, size: \\${sfzData.lengthInBytes} bytes');
+    print('[DEBUG] Checking asset: assets/wav/D3.wav');
+    final wavData = await rootBundle.load('assets/wav/D3.wav');
+    print('[DEBUG] Asset found: assets/wav/D3.wav, size: \\${wavData.lengthInBytes} bytes');
+  } catch (e, stack) {
+    print('[ERROR] Asset NOT found: \\${e.toString()}');
+    print('[ERROR] Stack trace: \\${stack.toString()}');
   }
 }
 
@@ -85,6 +89,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
 
     final instruments = [
       Sf2Instrument(path: "assets/sf2/TR-808.sf2", isAsset: true),
+      Sf2Instrument(path: "assets/sf2/8bitsf.SF2", isAsset: true),
       SfzInstrument(
         path: "assets/sfz/GMPiano.sfz",
         isAsset: true,
@@ -117,8 +122,16 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
             ])
           ])),
     ];
+    print('[DEBUG] Instruments created:');
+    for (final inst in instruments) {
+      print('  [DEBUG] Instrument: \\${inst.runtimeType} path=\${(inst as dynamic).path ?? inst.idOrPath ?? "<no path>"} isAsset=\${(inst as dynamic).isAsset ?? "<n/a>"}');
+    }
 
     sequence.createTracks(instruments).then((tracks) {
+      print('[DEBUG] Tracks created: count=\${tracks.length}');
+      for (final track in tracks) {
+        print('  [DEBUG] Track id=\${track.id} instrument=\${track.instrument.runtimeType} path=\${(track.instrument as dynamic).path ?? track.instrument.idOrPath ?? "<no path>"}');
+      }
       this.tracks = tracks;
       tracks.forEach((track) {
         trackVolumes[track.id] = 0.0;
@@ -197,12 +210,14 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
 
   handleTrackChange(Track? nextTrack) {
+    print('[DEBUG] Track changed: id=\${nextTrack?.id} instrument=\${nextTrack?.instrument.runtimeType} path=\${(nextTrack?.instrument as dynamic)?.path ?? nextTrack?.instrument.idOrPath ?? "<no path>"}');
     setState(() {
       selectedTrack = nextTrack;
     });
   }
 
   handleVolumeChange(double nextVolume) {
+    print('[DEBUG] Volume change: trackId=\${selectedTrack?.id} newVolume=\${nextVolume}');
     if (selectedTrack != null) {
       selectedTrack!.changeVolumeNow(volume: nextVolume);
     }
@@ -210,6 +225,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
 
   handleVelocitiesChange(
       int trackId, int step, int noteNumber, double velocity) {
+    print('[DEBUG] Velocity change: trackId=\${trackId} step=\${step} noteNumber=\${noteNumber} velocity=\${velocity}');
     final track = tracks.firstWhere((track) => track.id == trackId);
 
     trackStepSequencerStates[trackId]!.setVelocity(step, noteNumber, velocity);
@@ -218,10 +234,12 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
 
   syncTrack(track) {
+    print('[DEBUG] Syncing track: id=\${track.id}');
     track.clearEvents();
     trackStepSequencerStates[track.id]!
         .iterateEvents((step, noteNumber, velocity) {
       if (step < stepCount) {
+        print('  [DEBUG] Adding note: step=\${step} noteNumber=\${noteNumber} velocity=\${velocity}');
         track.addNote(
             noteNumber: noteNumber,
             velocity: velocity,
@@ -233,6 +251,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
 
   loadProjectState(ProjectState projectState) {
+    print('[DEBUG] Loading project state');
     handleStop();
 
     trackStepSequencerStates[tracks[0].id] = projectState.drumState;
