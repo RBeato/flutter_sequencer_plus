@@ -39,3 +39,5 @@ Pod::Spec.new do |s|
   s.prepare_command = './prepare.sh'
   s.vendored_frameworks = Dir['third_party/sfizz/xcframeworks/*.xcframework']
 end
+
+
