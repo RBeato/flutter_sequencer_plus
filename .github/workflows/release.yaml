@@ -1,0 +1,27 @@
+name: Upload Artifacts to Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  upload-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zip xcframeworks
+        run: zip -r xcframeworks.zip ios/third_party/sfizz/xcframeworks
+
+      - name: Zip headers
+        run: zip -r src.zip ios/third_party/sfizz/src
+
+      - name: Upload xcframeworks.zip to release
+        run: gh release upload ${{ github.event.release.tag_name }} xcframeworks.zip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload src.zip to release
+        run: gh release upload ${{ github.event.release.tag_name }} src.zip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

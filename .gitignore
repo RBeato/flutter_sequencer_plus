@@ -20,3 +20,9 @@ install_manifest.txt
 compile_commands.json
 CTestTestfile.cmake
 _deps
+
+# Sfizz plugin artifacts and temp files
+ios/third_party/sfizz/xcframeworks/
+ios/third_party/sfizz/src/
+ios/xcframeworks.zip
+ios/src.zip
