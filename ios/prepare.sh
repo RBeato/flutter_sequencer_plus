@@ -3,7 +3,7 @@ set -e
 
 echo "Starting prepare.sh script..."
 
-VERSION="v1.0.0"
+VERSION="v0.1.0"
 REPO_URL="https://github.com/RBeato/flutter_sequencer_plus/releases/download"
 
 EXPECTED_XC="95def6efebafeb6e4780bfae6cf7056c621b15a2ebaa14c30241333c1bc36e71"
