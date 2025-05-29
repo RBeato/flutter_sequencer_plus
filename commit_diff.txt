@@ -1,0 +1,9 @@
+diff --git a/example/ios/Flutter/Release.xcconfig b/example/ios/Flutter/Release.xcconfig
+index c4855bf..77ee20e 100644
+--- a/example/ios/Flutter/Release.xcconfig
++++ b/example/ios/Flutter/Release.xcconfig
+@@ -1,2 +1,3 @@
+ #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
+ #include "Generated.xcconfig"
++ENABLE_TESTABILITY = YES
+\ No newline at end of file
