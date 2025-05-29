@@ -25,9 +25,49 @@ download_file() {
   while [ $retry_count -lt $max_retries ]; do
     echo "Downloading $url... (Attempt $((retry_count + 1))/$max_retries)"
     
-    # Simple curl command with basic error handling
-    echo "Downloading from: $url"
-    if curl -L -f -o "$dest" "$url"; then
+    # Create temp directory
+    local temp_dir=$(mktemp -d)
+    local temp_file="${temp_dir}/$(basename "$dest")"
+    
+    echo "=== DOWNLOAD INFO ==="
+    echo "Source URL: $url"
+    echo "Temp file: $temp_file"
+    echo "Final destination: $dest"
+    
+    # Try wget first, fall back to curl if wget isn't available
+    if command -v wget >/dev/null 2>&1; then
+      echo "Using wget for download..."
+      if ! wget --tries=3 --timeout=30 -q --show-progress -O "$temp_file" "$url"; then
+        echo "wget failed, trying curl..."
+        rm -f "$temp_file"
+        if ! curl -L -f -o "$temp_file" "$url"; then
+          echo "Download failed with curl"
+          rm -rf "$temp_dir"
+          return 1
+        fi
+      fi
+    else
+      echo "wget not found, using curl..."
+      if ! curl -L -f -o "$temp_file" "$url"; then
+        echo "Download failed with curl"
+        rm -rf "$temp_dir"
+        return 1
+      fi
+    fi
+    
+    # Verify we got a valid file
+    if [ ! -s "$temp_file" ]; then
+      echo "Error: Downloaded file is empty"
+      rm -rf "$temp_dir"
+      return 1
+    fi
+    
+    # Move to final destination
+    mkdir -p "$(dirname "$dest")"
+    mv "$temp_file" "$dest"
+    rm -rf "$temp_dir"
+    
+    echo "Download complete. File size: $(wc -c < "$dest") bytes"
       # Verify the file was downloaded successfully and has content
       if [ -s "$dest" ]; then
         # Check if this is actually an error page (sometimes GitHub returns HTML for errors)
