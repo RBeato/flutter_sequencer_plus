@@ -1,0 +1,6 @@
+framework module Sfizz {
+    umbrella header "SfizzAU.h"
+    
+    export *
+    module * { export * }
+}

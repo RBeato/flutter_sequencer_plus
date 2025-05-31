@@ -1,0 +1,45 @@
+framework module flutter_sequencer {
+    // Include all public headers
+    umbrella header "flutter_sequencer.h"
+    
+    // Explicitly link required frameworks
+    link framework "AudioToolbox"
+    link framework "CoreAudio"
+    link framework "CoreAudioKit"
+    link framework "AVFoundation"
+    
+    // Export all public headers
+    export *
+    module * { export * }
+    
+    // C++ headers
+    header "CallbackManager/CallbackManager.h"
+    header "Scheduler/BaseScheduler.h"
+    header "Scheduler/Buffer.h"
+    header "Scheduler/SchedulerEvent.h"
+    header "IInstrument/IInstrument.h"
+    header "IInstrument/SharedInstruments/SfizzSamplerInstrument.h"
+    header "AudioUnit/BufferedAudioBus.hpp"
+    header "AudioUnit/DSPKernel.hpp"
+    header "AudioUnit/DSPKernel.mm"
+    
+    // Sfizz AudioUnit module
+    module Sfizz {
+        header "AudioUnit/Sfizz/SfizzAU.h"
+        header "AudioUnit/Sfizz/SfizzDSPKernel.hpp"
+        header "AudioUnit/Sfizz/SfizzDSPKernelAdapter.h"
+        export *
+    }
+    
+    // AudioUnit utilities
+    module AudioUnitUtils {
+        header "AudioUnit/AudioUnitUtils.swift"
+        export *
+    }
+    
+    // Explicitly declare Swift/C++ interop
+    module SwiftFlutterSequencer {
+        header "SwiftFlutterSequencerPlugin-Swift.h"
+        requires objc
+    }
+}
