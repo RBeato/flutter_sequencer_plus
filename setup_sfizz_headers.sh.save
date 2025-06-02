@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# Create the target directory
+mkdir -p /Users/rbsou/Documents/CODE/FLUTTER/flutter_sequencer_plus/android/src/main/cpp/sfizz/include
+
+# Download the sfizz source package
+wget https://github.com/sfztools/sfizz/archive/refs/tags/1.2.0.tar.gz -O /tmp/sfizz.tar.gz
+
+# Extract just the headers we need
+tar -xzf /tmp/sfizz.tar.gz -C /tmp --wildca

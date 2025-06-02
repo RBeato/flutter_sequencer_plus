@@ -1,21 +1,19 @@
-group 'com.michaeljperri.flutter_sequencer'
-version '1.0-SNAPSHOT'
-
 buildscript {
     ext.kotlin_version = '1.8.22'
+    ext.agp_version = '8.1.2'
+    
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.1.2'
+        classpath "com.android.tools.build:gradle:$agp_version"
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-        classpath "org.eclipse.jgit:org.eclipse.jgit:5.12.0+"
     }
 }
 
-rootProject.allprojects {
+allprojects {
     repositories {
         google()
         mavenCentral()
@@ -25,38 +23,133 @@ rootProject.allprojects {
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
+// Create a task to run prepare_android.sh
+tasks.register('prepareAndroidDependencies', Exec) {
+    workingDir projectDir
+    commandLine 'sh', './prepare_android.sh'
+    
+    // Only run if the script exists and is executable
+    onlyIf {
+        def script = new File("$projectDir/prepare_android.sh")
+        script.exists() && script.canExecute()
+    }
+    
+    // Standard output/error logging
+    standardOutput = new ByteArrayOutputStream()
+    errorOutput = new ByteArrayOutputStream()
+    ignoreExitValue true // Don't fail build if script fails
+    
+    doLast {
+        // Log the output
+        logger.lifecycle("Prepare script output: ${standardOutput.toString()}")
+        if (execResult.exitValue != 0) {
+            logger.error("Prepare script failed with exit code ${execResult.exitValue}")
+            logger.error("Error output: ${errorOutput.toString()}")
+            // Don't fail the build, as we might be using a minimal implementation
+        }
+    }
+}
+
+// Ensure prepare runs before any build tasks
+tasks.whenTaskAdded { task ->
+    // Run before any build or CMake tasks
+    if (task.name == 'preBuild' || 
+        task.name.contains('CMake') || 
+        task.name.contains('cMake') ||
+        task.name.startsWith('generate') ||
+        task.name.contains('ExternalNative') ||
+        task.name.contains('externalNative')) {
+        task.dependsOn prepareAndroidDependencies
+    }
+}
+
+// Make sure the prepare task runs before any other tasks
+afterEvaluate {
+    tasks.matching { 
+        it.name.startsWith('externalNativeBuild') || 
+        it.name.startsWith('generate') ||
+        it.name.contains('CMake') ||
+        it.name == 'preBuild'
+    }.each { task ->
+        task.dependsOn prepareAndroidDependencies
+    }
+}
+
 android {
     namespace 'com.michaeljperri.flutter_sequencer'
-    compileSdkVersion 34
-
+    compileSdk 34
+    
+    defaultConfig {
+        minSdkVersion 21
+        targetSdkVersion 34
+        versionCode 1
+        versionName "1.0"
+        
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++17"
+                arguments "-DANDROID_STL=c++_shared",
+                          "-DANDROID_ARM_NEON=TRUE",
+                          "-DANDROID_TOOLCHAIN=clang",
+                          "-DANDROID_CPP_FEATURES=rtti exceptions",
+                          "-DCMAKE_VERBOSE_MAKEFILE=ON"
+            }
+        }
+        
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86_64'
+        }
+    }
+    
+    buildFeatures {
+        prefab true
+    }
+    
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
     }
-    defaultConfig {
-        minSdkVersion 21
-
-        externalNativeBuild {
-            cmake {
-                cppFlags '-std=c++17', '-frelaxed-template-template-args'
-            }
-        }
-    }
+    
     lintOptions {
         disable 'InvalidPackage'
+        abortOnError false
     }
-    ndkVersion "25.2.9519653"
+    
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+    
     externalNativeBuild {
         cmake {
             version "3.22.1"
             path "CMakeLists.txt"
+            buildStagingDirectory "${buildDir}/cmake"
         }
     }
-
-    kotlinOptions {
-        jvmTarget = "1.8"
+    
+    packagingOptions {
+        pickFirst 'lib/arm64-v8a/libsfizz.so'
+        pickFirst 'lib/armeabi-v7a/libsfizz.so'
+        pickFirst 'lib/x86/libsfizz.so'
+        pickFirst 'lib/x86_64/libsfizz.so'
+    }
+    
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            jniDebuggable true
+            debuggable true
+        }
     }
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
 }

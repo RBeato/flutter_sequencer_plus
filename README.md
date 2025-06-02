@@ -17,6 +17,139 @@ or even to generate a dynamic game soundtrack.
 
 ![Drum machine example on Android](https://michaeljperri.com/images/DrumMachineExampleAndroid.png)
 
+## Setup
+
+### Android Setup
+
+1. **Prerequisites**:
+   - Flutter SDK with Android development tools
+   - Android NDK (version 25.2.9519653 recommended)
+   - CMake 3.22.1 or later
+
+2. **Add to your app's `android/app/build.gradle`**:
+   ```gradle
+   android {
+       // Enable prefab for native dependencies
+       buildFeatures {
+           prefab true
+       }
+       
+       // Set NDK version
+       ndkVersion "25.2.9519653"
+       
+       defaultConfig {
+           // ... other configs ...
+           externalNativeBuild {
+               cmake {
+                   cppFlags '-std=c++17', '-frelaxed-template-template-args'
+               }
+           }
+       }
+       
+       externalNativeBuild {
+           cmake {
+               version "3.22.1"
+               path "CMakeLists.txt"
+           }
+       }
+   }
+   ```
+
+3. **The build system will automatically download and set up the required native dependencies** (Oboe, sfizz, TinySoundFont) during the build process.
+
+4. **For custom builds**, you can run the prepare script manually:
+   ```bash
+   cd android
+   ./prepare_android.sh
+   ```
+
+5. **Troubleshooting**:
+   - Ensure you have the correct NDK version installed
+   - Clean and rebuild the project if you encounter any issues
+   - Verify that all required Android build tools are installed
+
+2. Make sure you have the following in your app's `android/app/build.gradle`:
+
+```gradle
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader ->
+        localProperties.load(reader)
+    }
+}
+
+android {
+    // ... other configurations ...
+    
+    // Add this if you don't have it already
+    ndkVersion localProperties.getProperty('ndk.version')
+    
+    // Make sure these are set
+    compileSdkVersion 34
+    
+    defaultConfig {
+        // ... other configs ...
+        minSdkVersion 21
+        targetSdkVersion 34
+        
+        externalNativeBuild {
+            cmake {
+                cppFlags '-std=c++17', '-frelaxed-template-template-args'
+            }
+        }
+    }
+    
+    externalNativeBuild {
+        cmake {
+            version "3.22.1"
+            path "CMakeLists.txt"
+        }
+    }
+}
+
+// Add this if you don't have it already
+configurations.all {
+    resolutionStrategy {
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+    }
+}
+```
+
+3. Add the following to your app's `android/gradle.properties`:
+
+```properties
+android.useAndroidX=true
+android.enableJetifier=true
+org.gradle.jvmargs=-Xmx1536M
+android.defaults.buildfeatures.buildconfig=true
+```
+
+4. Make sure you have the following in your app's `android/build.gradle`:
+
+```gradle
+buildscript {
+    ext.kotlin_version = '1.8.22'
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.1.2'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+```
+
 ## How to use
 ### Create the sequence
 ```dart
