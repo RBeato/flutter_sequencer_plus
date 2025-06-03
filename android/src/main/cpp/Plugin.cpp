@@ -1,8 +1,10 @@
 #include <thread>
-#include "SharedInstruments/SfizzSamplerInstrument.h"
+#include "IInstrument/SharedInstruments/SfizzSamplerInstrument.h"
 #include "AndroidEngine/AndroidEngine.h"
 #include "AndroidInstruments/SoundFontInstrument.h"
 #include "Utils/OptionArray.h"
+#include "Scheduler/BaseScheduler.h"
+#include "Scheduler/SchedulerEvent.h"
 
 std::unique_ptr<AndroidEngine> engine;
 
