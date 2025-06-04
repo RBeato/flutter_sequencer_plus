@@ -16,7 +16,7 @@ include_directories(
     ${ANDROID_DIR}/src/main/cpp
     ${IOS_DIR}/Classes
     ${THIRD_PARTY_DIR}/sfizz/include
-    ${THIRD_PARTY_DIR}/sfizz/src
+    ${THIRD_PARTY_DIR}/sfizz_source/src
     ${THIRD_PARTY_DIR}/oboe/include
 )
 
@@ -30,7 +30,7 @@ if(EXISTS ${SFIZZ_LIBRARY})
     add_library(sfizz SHARED IMPORTED)
     set_target_properties(sfizz PROPERTIES
         IMPORTED_LOCATION ${SFIZZ_LIBRARY}
-        INTERFACE_INCLUDE_DIRECTORIES "${THIRD_PARTY_DIR}/sfizz/include;${THIRD_PARTY_DIR}/sfizz/src"
+        INTERFACE_INCLUDE_DIRECTORIES "${THIRD_PARTY_DIR}/sfizz/include;${THIRD_PARTY_DIR}/sfizz_source/src"
     )
     set(SFIZZ_AVAILABLE TRUE)
     message(STATUS "Using pre-built sfizz library: ${SFIZZ_LIBRARY}")
@@ -71,7 +71,7 @@ target_include_directories(flutter_sequencer PRIVATE
     ${IOS_DIR}/Classes/Scheduler
     ${IOS_DIR}/Classes/IInstrument
     ${THIRD_PARTY_DIR}/sfizz/include
-    ${THIRD_PARTY_DIR}/sfizz/include/sfizz
+    ${THIRD_PARTY_DIR}/sfizz_source/src
     ${ANDROID_DIR}/src/main/cpp/third_party/TinySoundFont
 )
 
