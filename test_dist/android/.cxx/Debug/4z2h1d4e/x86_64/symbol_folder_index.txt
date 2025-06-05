@@ -1,0 +1,1 @@
+/Users/rbsou/Documents/CODE/FLUTTER/flutter_sequencer_plus/example/build/flutter_sequencer/intermediates/cxx/Debug/4z2h1d4e/obj/x86_64

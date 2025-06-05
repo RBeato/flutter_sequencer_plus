@@ -58,7 +58,10 @@ post_install do |installer|
       
       # Additional linker flags
       other_ldflags = config.build_settings['OTHER_LDFLAGS'] || ['$(inherited)']
-      other_ldflags += [
+      unless other_ldflags.is_a?(Array)
+        other_ldflags = [other_ldflags.to_s]
+      end
+      other_ldflags = other_ldflags + [
         '-ObjC',
         '-lc++',
         '-framework', 'AudioToolbox',
@@ -71,7 +74,10 @@ post_install do |installer|
       
       # Include paths for sfizz and other dependencies
       header_search_paths = config.build_settings['HEADER_SEARCH_PATHS'] || ['$(inherited)']
-      header_search_paths += [
+      unless header_search_paths.is_a?(Array)
+        header_search_paths = [header_search_paths.to_s]
+      end
+      header_search_paths = header_search_paths + [
         '${PODS_ROOT}/../.symlinks/plugins/flutter_sequencer/macos/Classes',
         '${PODS_ROOT}/../.symlinks/plugins/flutter_sequencer/macos/third_party/sfizz/src',
         '${PODS_ROOT}/../.symlinks/plugins/flutter_sequencer/macos/third_party/sfizz/xcframeworks/libsfizz.xcframework/macos-arm64_x86_64/Headers'
@@ -80,7 +86,10 @@ post_install do |installer|
       
       # Library search paths
       library_search_paths = config.build_settings['LIBRARY_SEARCH_PATHS'] || ['$(inherited)']
-      library_search_paths += [
+      unless library_search_paths.is_a?(Array)
+        library_search_paths = [library_search_paths.to_s]
+      end
+      library_search_paths = library_search_paths + [
         '${PODS_CONFIGURATION_BUILD_DIR}',
         '${PODS_ROOT}/../.symlinks/plugins/flutter_sequencer/macos/third_party/sfizz/xcframeworks'
       ]
@@ -88,11 +97,17 @@ post_install do |installer|
       
       # Add -fmodules to OTHER_CFLAGS
       other_cflags = config.build_settings['OTHER_CFLAGS'] || ['$(inherited)']
+      unless other_cflags.is_a?(Array)
+        other_cflags = [other_cflags.to_s]
+      end
       other_cflags << '-fmodules' unless other_cflags.include?('-fmodules')
       config.build_settings['OTHER_CFLAGS'] = other_cflags
       
       # Add -fcxx-modules to OTHER_CPLUSPLUSFLAGS
       other_cplusplusflags = config.build_settings['OTHER_CPLUSPLUSFLAGS'] || ['$(inherited)']
+      unless other_cplusplusflags.is_a?(Array)
+        other_cplusplusflags = [other_cplusplusflags.to_s]
+      end
       other_cplusplusflags << '-fcxx-modules' unless other_cplusplusflags.include?('-fcxx-modules')
       config.build_settings['OTHER_CPLUSPLUSFLAGS'] = other_cplusplusflags
     end

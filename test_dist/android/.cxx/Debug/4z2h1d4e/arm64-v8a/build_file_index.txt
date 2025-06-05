@@ -1,0 +1,2 @@
+/Users/rbsou/Documents/CODE/FLUTTER/flutter_sequencer_plus/android/CMakeLists.txt
+/Users/rbsou/Documents/CODE/FLUTTER/flutter_sequencer_plus/android/third_party/oboe/CMakeLists.txt

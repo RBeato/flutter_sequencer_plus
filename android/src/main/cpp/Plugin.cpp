@@ -1,10 +1,15 @@
 #include <thread>
-#include "IInstrument/SharedInstruments/SfizzSamplerInstrument.h"
 #include "AndroidEngine/AndroidEngine.h"
 #include "AndroidInstruments/SoundFontInstrument.h"
 #include "Utils/OptionArray.h"
 #include "Scheduler/BaseScheduler.h"
 #include "Scheduler/SchedulerEvent.h"
+#include "CallbackManager/CallbackManager.h"
+
+// Only include SfizzSamplerInstrument if sfizz is available
+#if defined(SFIZZ_AVAILABLE) && SFIZZ_AVAILABLE
+#include "IInstrument/SharedInstruments/SfizzSamplerInstrument.h"
+#endif
 
 std::unique_ptr<AndroidEngine> engine;
 
@@ -56,6 +61,7 @@ extern "C" {
 
     __attribute__((visibility("default"))) __attribute__((used))
     void add_track_sfz(const char* filename, const char* tuningFilename, Dart_Port callbackPort) {
+#if defined(SFIZZ_AVAILABLE) && SFIZZ_AVAILABLE
         check_engine();
 
         std::thread([=]() {
@@ -74,10 +80,15 @@ extern "C" {
                 callbackToDartInt32(callbackPort, -1);
             }
         }).detach();
+#else
+        // SFZ support not available in this build
+        callbackToDartInt32(callbackPort, -1);
+#endif
     }
 
     __attribute__((visibility("default"))) __attribute__((used))
     void add_track_sfz_string(const char* sampleRoot, const char* sfzString, const char* tuningString, Dart_Port callbackPort) {
+#if defined(SFIZZ_AVAILABLE) && SFIZZ_AVAILABLE
         check_engine();
 
         std::thread([=]() {
@@ -96,6 +107,10 @@ extern "C" {
                 callbackToDartInt32(callbackPort, -1);
             }
         }).detach();
+#else
+        // SFZ support not available in this build
+        callbackToDartInt32(callbackPort, -1);
+#endif
     }
 
 __attribute__((visibility("default"))) __attribute__((used))

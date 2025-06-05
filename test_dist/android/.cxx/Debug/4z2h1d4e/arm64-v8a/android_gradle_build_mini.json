@@ -1,0 +1,36 @@
+{
+  "buildFiles": [
+    "/Users/rbsou/Documents/CODE/FLUTTER/flutter_sequencer_plus/android/CMakeLists.txt",
+    "/Users/rbsou/Documents/CODE/FLUTTER/flutter_sequencer_plus/android/third_party/oboe/CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "/Users/rbsou/Library/Android/sdk/cmake/3.18.1/bin/ninja",
+      "-C",
+      "/Users/rbsou/Documents/CODE/FLUTTER/flutter_sequencer_plus/android/.cxx/Debug/4z2h1d4e/arm64-v8a",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "/Users/rbsou/Library/Android/sdk/cmake/3.18.1/bin/ninja",
+    "-C",
+    "/Users/rbsou/Documents/CODE/FLUTTER/flutter_sequencer_plus/android/.cxx/Debug/4z2h1d4e/arm64-v8a",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {
+    "flutter_sequencer::@6890427a1f51a3e7e1df": {
+      "artifactName": "flutter_sequencer",
+      "abi": "arm64-v8a",
+      "output": "/Users/rbsou/Documents/CODE/FLUTTER/flutter_sequencer_plus/example/build/flutter_sequencer/intermediates/cxx/Debug/4z2h1d4e/obj/arm64-v8a/libflutter_sequencer.so",
+      "runtimeFiles": [
+        "/Users/rbsou/Documents/CODE/FLUTTER/flutter_sequencer_plus/android/third_party/sfizz/lib/arm64-v8a/libsfizz.so"
+      ]
+    },
+    "oboe::@2eb8bc11657237233fcf": {
+      "artifactName": "oboe",
+      "abi": "arm64-v8a",
+      "output": "/Users/rbsou/Documents/CODE/FLUTTER/flutter_sequencer_plus/android/.cxx/Debug/4z2h1d4e/arm64-v8a/oboe-bin/liboboe.a",
+      "runtimeFiles": []
+    }
+  }
+}
