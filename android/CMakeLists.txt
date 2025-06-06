@@ -71,12 +71,20 @@ target_link_libraries(flutter_sequencer
     ${opensl-lib}
 )
 
-# Compiler optimizations
+# Aggressive compiler optimizations for maximum performance
 target_compile_options(flutter_sequencer PRIVATE
     -Wall
     -Wno-unused-parameter
     -fvisibility=hidden
     -fPIC
-    -O2
+    -O3  # Maximum optimization
     -ffast-math
+    -ftree-vectorize  # Enable auto-vectorization
+    -funsafe-math-optimizations  # Allow more aggressive math optimizations
+    -fno-signed-zeros
+    -fno-trapping-math
+    -frename-registers
+    -funroll-loops
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>  # Disable exceptions for performance
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>        # Disable RTTI for performance
 )

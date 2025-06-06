@@ -31,8 +31,13 @@ android {
         
         externalNativeBuild {
             cmake {
-                cppFlags "-std=c++17", "-ffast-math"
-                arguments "-DANDROID_STL=c++_shared", "-DANDROID_ARM_NEON=TRUE", "-DANDROID_TOOLCHAIN=clang", "-DCMAKE_BUILD_TYPE=Release"
+                cppFlags "-std=c++17", "-ffast-math", "-O3", "-DNDEBUG"
+                arguments "-DANDROID_STL=c++_shared", 
+                         "-DANDROID_ARM_NEON=TRUE", 
+                         "-DANDROID_TOOLCHAIN=clang", 
+                         "-DCMAKE_BUILD_TYPE=Release",
+                         "-DANDROID_ARM_MODE=arm",
+                         "-DANDROID_DISABLE_FORMAT_STRING_CHECKS=TRUE"
             }
         }
         

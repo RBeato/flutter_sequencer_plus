@@ -13,71 +13,53 @@ Pod::Spec.new do |s|
   s.source           = { :path => '.' }
   
   # Platform setup
-  s.platform = :osx, '10.13'
-  s.osx.deployment_target = '10.13'
+  s.platform = :osx, '10.14'
+  s.osx.deployment_target = '10.14'
   
   # Source files
   s.source_files = 'Classes/**/*.{h,m,mm,swift}'
   s.public_header_files = 'Classes/**/*.h'
-  s.private_header_files = 'Classes/**/*.h'
-  
-  # Module map
-  s.module_map = 'Classes/module.modulemap'
-  
-  # Compiler flags
-  s.pod_target_xcconfig = {
-    'DEFINES_MODULE' => 'YES',
-    'SWIFT_VERSION' => '5.0',
-    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
-    'CLANG_CXX_LIBRARY' => 'libc++',
-    'OTHER_CPLUSPLUSFLAGS' => '$(OTHER_CFLAGS) -fno-objc-arc -fmodules -fcxx-modules',
-    'OTHER_CFLAGS' => '-fno-objc-arc -fmodules -fcxx-modules',
-    'HEADER_SEARCH_PATHS' => '${PODS_ROOT}/Headers/Public',
-    'LIBRARY_SEARCH_PATHS' => '${PODS_CONFIGURATION_BUILD_DIR}',
-    'SWIFT_INCLUDE_PATHS' => '${PODS_TARGET_SRCROOT}/Classes/**',
-    'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) GPB_USE_PROTOBUF_FRAMEWORK_IMPORTS=1',
-    'ENABLE_BITCODE' => 'NO',
-    'STRIP_STYLE' => 'non-global',
-    'APPLICATION_EXTENSION_API_ONLY' => 'NO'
-  }
+  s.preserve_paths = 'third_party/sfizz/src/**/*'
   
   # Dependencies
+  s.dependency 'FlutterMacOS'
+  s.static_framework = true
+  
+  # Vendored frameworks
+  s.vendored_frameworks = 'third_party/sfizz/xcframeworks/*.xcframework'
+  
+  # Frameworks
   s.frameworks = 'Foundation', 'CoreAudioKit', 'AudioToolbox', 'AVFoundation', 'CoreAudio', 'CoreMIDI', 'AudioUnit'
   s.libraries = 'c++'
   s.requires_arc = true
   
-  # Resource bundles
-  s.resource_bundles = {
-    'flutter_sequencer' => ['prepare.sh']
-  }
-  s.xcconfig = {
-    'USER_HEADER_SEARCH_PATHS' => '"${PROJECT_DIR}/.."/Classes/CallbackManager/*,"${PROJECT_DIR}/.."/Classes/Scheduler/*,"${PROJECT_DIR}/.."/Classes/AudioUnit/Sfizz/SfizzDSPKernelAdapter.h',
-  }
-  s.dependency 'FlutterMacOS'
-  s.static_framework = true
-  s.platform = :osx, '10.14'
-
+  # Pod target configuration
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'EXCLUDED_ARCHS[sdk=macosx*]' => 'i386',
     'ENABLE_TESTABILITY' => 'YES',
     'STRIP_STYLE' => 'non-global',
-    'HEADER_SEARCH_PATHS' => '$(PODS_TARGET_SRCROOT)/third_party/sfizz/src',
+    'HEADER_SEARCH_PATHS' => '$(inherited) $(PODS_TARGET_SRCROOT)/third_party/sfizz/src $(PODS_ROOT)/flutter_sequencer/third_party/sfizz/src',
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++2a',
     'CLANG_CXX_LIBRARY' => 'libc++',
-    'OTHER_CPLUSPLUSFLAGS' => '-std=c++2a -fmodules -fcxx-modules -fno-objc-arc',
+    'OTHER_CPLUSPLUSFLAGS' => '$(inherited) -std=c++2a -fmodules -fcxx-modules',
     'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) SFIZZ_AUDIOUNIT=1',
-    'OTHER_SWIFT_FLAGS' => '$(inherited) -DSFIZZ_AUDIOUNIT'
+    'OTHER_SWIFT_FLAGS' => '$(inherited) -DSFIZZ_AUDIOUNIT',
+    'ENABLE_BITCODE' => 'NO',
+    'APPLICATION_EXTENSION_API_ONLY' => 'NO'
+  }
+  
+  # User target configuration
+  s.user_target_xcconfig = {
+    'HEADER_SEARCH_PATHS' => '$(inherited) $(PODS_ROOT)/flutter_sequencer/third_party/sfizz/src'
   }
   
   s.swift_version = '5.0'
-  s.library = 'c++'
-  s.xcconfig = {
-    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++2a',
-    'CLANG_CXX_LIBRARY' => 'libc++',
-    'CONFIGURATION_BUILD_DIR' => '${PODS_CONFIGURATION_BUILD_DIR}/flutter_sequencer',
-    'OTHER_CFLAGS' => '$(inherited) -include ${PODS_ROOT}/../overrides.xcconfig'
-  }
-  s.prepare_command = './prepare.sh'
-  s.vendored_frameworks = Dir['third_party/sfizz/xcframeworks/*.xcframework']
+  
+  # Don't run prepare command when used as dependency
+  if Dir.exist?('third_party/sfizz/xcframeworks') && Dir.exist?('third_party/sfizz/src')
+    puts "sfizz dependencies already present, skipping prepare.sh"
+  else
+    s.prepare_command = './prepare.sh'
+  end
 end

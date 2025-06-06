@@ -42,20 +42,24 @@ extern "C" {
     void add_track_sf2(const char* filename, bool isAsset, int32_t presetIndex, Dart_Port callbackPort) {
         check_engine();
 
+        // Use a detached thread to avoid blocking the calling thread
         std::thread([=]() {
-            auto sf2Instrument = new SoundFontInstrument();
-            setInstrumentOutputFormat(sf2Instrument);
+            try {
+                auto sf2Instrument = std::make_unique<SoundFontInstrument>();
+                setInstrumentOutputFormat(sf2Instrument.get());
 
-            auto didLoad = sf2Instrument->loadSf2File(filename, isAsset, presetIndex);
+                auto didLoad = sf2Instrument->loadSf2File(filename, isAsset, presetIndex);
 
-            if (didLoad) {
-                auto trackIndex = engine->mSchedulerMixer.addTrack(sf2Instrument);
-
-                callbackToDartInt32(callbackPort, trackIndex);
-            } else {
+                if (didLoad) {
+                    auto trackIndex = engine->mSchedulerMixer.addTrack(sf2Instrument.release());
+                    callbackToDartInt32(callbackPort, trackIndex);
+                } else {
+                    callbackToDartInt32(callbackPort, -1);
+                }
+            } catch (const std::exception& e) {
+                LOGE("Error loading SF2 track: %s", e.what());
                 callbackToDartInt32(callbackPort, -1);
             }
-
         }).detach();
     }
 

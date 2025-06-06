@@ -13,8 +13,8 @@
 #include "../Utils/OptionArray.h"
 #include "../Utils/Logging.h"
 
-constexpr int32_t kBufferSize = 192*10;  // Temporary buffer is used for mixing
-constexpr uint8_t kMaxTracks = 100;
+constexpr int32_t kBufferSize = 128*4;  // Optimized buffer size for performance
+constexpr uint8_t kMaxTracks = 64;  // Reasonable limit for mobile performance
 
 /**
  * A Mixer object which sums the output from multiple tracks into a single output. The number of
@@ -40,17 +40,39 @@ public:
             return;
         }
 
-        // Zero out the incoming container array
-        memset(audioData, 0, sizeof(float) * numFrames * mChannelCount);
+        // Zero out the incoming container array efficiently
+        const size_t totalSamples = numFrames * mChannelCount;
+        memset(audioData, 0, sizeof(float) * totalSamples);
 
-        for (std::pair<track_index_t, TrackInfo> pair : mTrackMap) {
-            auto trackIndex = pair.first;
-            auto trackInfo = pair.second;
+        // Early exit if no tracks
+        if (mTrackMap.empty()) {
+            return;
+        }
+
+        // Render each track and mix
+        for (const auto& pair : mTrackMap) {
+            const auto trackIndex = pair.first;
+            const auto& trackInfo = pair.second;
+
+            // Skip silent tracks
+            if (trackInfo.level <= 0.0f) {
+                continue;
+            }
 
             handleFrames(trackIndex, numFrames);
 
-            for (int j = 0; j < numFrames * mChannelCount; ++j) {
-                audioData[j] += mixingBuffer[j] * trackInfo.level;
+            // Optimized mixing loop with level scaling
+            const float level = trackInfo.level;
+            if (level == 1.0f) {
+                // Fast path for unity gain
+                for (size_t j = 0; j < totalSamples; ++j) {
+                    audioData[j] += mixingBuffer[j];
+                }
+            } else {
+                // General case with level scaling
+                for (size_t j = 0; j < totalSamples; ++j) {
+                    audioData[j] += mixingBuffer[j] * level;
+                }
             }
         }
     }

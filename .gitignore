@@ -22,7 +22,10 @@ CTestTestfile.cmake
 _deps
 
 # Sfizz plugin artifacts and temp files
-ios/third_party/sfizz/xcframeworks/
-ios/third_party/sfizz/src/
+# Don't ignore xcframeworks and headers - they need to be in the repo for the package to work
+# ios/third_party/sfizz/xcframeworks/
+# ios/third_party/sfizz/src/
 ios/xcframeworks.zip
 ios/src.zip
+macos/xcframeworks.zip
+macos/src.zip

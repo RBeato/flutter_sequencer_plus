@@ -26,7 +26,7 @@ public:
 private:
     static constexpr int32_t kSampleRate = 44100;
     static constexpr int32_t kChannelCount = 2;
-    static constexpr int32_t kBufferSizeFrames = 256;
+    static constexpr int32_t kBufferSizeFrames = 128;  // Reduced for lower latency
     
     std::atomic<bool> mIsPlaying{false};
     std::thread mAudioThread;
@@ -39,16 +39,23 @@ private:
     SLPlayItf mPlayerPlay = nullptr;
     SLAndroidSimpleBufferQueueItf mPlayerBufferQueue = nullptr;
     
-    // Audio buffers
-    static constexpr int kNumBuffers = 2;
-    int16_t* mAudioBuffers[kNumBuffers];
-    float* mTempFloatBuffer;  // Temporary buffer for audio rendering
-    int mCurrentBuffer = 0;
+    // Audio buffers - optimized for performance
+    static constexpr int kNumBuffers = 3;  // Triple buffering for better stability
+    alignas(32) int16_t* mAudioBuffers[kNumBuffers];  // Aligned for SIMD operations
+    alignas(32) float* mTempFloatBuffer;  // Aligned temporary buffer
+    std::atomic<int> mCurrentBuffer{0};  // Atomic for thread safety
+    
+    // Performance monitoring
+    std::atomic<uint64_t> mDroppedFrames{0};
+    std::atomic<uint64_t> mTotalFrames{0};
     
     void audioThreadFunc();
     bool initOpenSLES();
     void cleanupOpenSLES();
     static void playerCallback(SLAndroidSimpleBufferQueueItf bq, void* context);
+    
+    // Inline performance-critical functions
+    inline void convertFloatToInt16(const float* input, int16_t* output, int numSamples) noexcept;
 };
 
 #endif //ANDROID_ENGINE_H

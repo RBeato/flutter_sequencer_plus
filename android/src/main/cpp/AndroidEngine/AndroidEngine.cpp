@@ -3,21 +3,39 @@
 #include "CallbackManager.h"
 #include <chrono>
 #include <memory>
+#include <algorithm>
+#include <cstdlib>  // For posix_memalign
+
+#ifdef __ARM_NEON__
+#include <arm_neon.h>
+#endif
 
 AndroidEngine::AndroidEngine(Dart_Port sampleRateCallbackPort) {
     mSchedulerMixer.setChannelCount(kChannelCount);
     
-    // Allocate audio buffers
+    // Allocate aligned audio buffers for optimal SIMD performance
+    const size_t bufferSize = kBufferSizeFrames * kChannelCount;
     for (int i = 0; i < kNumBuffers; ++i) {
-        mAudioBuffers[i] = new int16_t[kBufferSizeFrames * kChannelCount];
-        memset(mAudioBuffers[i], 0, kBufferSizeFrames * kChannelCount * sizeof(int16_t));
+        // Use aligned allocation for SIMD optimization
+        if (posix_memalign(reinterpret_cast<void**>(&mAudioBuffers[i]), 
+                          32, bufferSize * sizeof(int16_t)) != 0) {
+            LOGE("Failed to allocate aligned audio buffer %d", i);
+            // Fallback to regular allocation
+            mAudioBuffers[i] = new int16_t[bufferSize];
+        }
+        memset(mAudioBuffers[i], 0, bufferSize * sizeof(int16_t));
     }
     
-    // Allocate temporary float buffer for audio rendering
-    mTempFloatBuffer = new float[kBufferSizeFrames * kChannelCount];
-    memset(mTempFloatBuffer, 0, kBufferSizeFrames * kChannelCount * sizeof(float));
+    // Allocate aligned temporary float buffer for audio rendering
+    if (posix_memalign(reinterpret_cast<void**>(&mTempFloatBuffer), 
+                      32, bufferSize * sizeof(float)) != 0) {
+        LOGE("Failed to allocate aligned float buffer");
+        // Fallback to regular allocation
+        mTempFloatBuffer = new float[bufferSize];
+    }
+    memset(mTempFloatBuffer, 0, bufferSize * sizeof(float));
     
-    // Initialize OpenSL ES
+    // Initialize OpenSL ES with performance settings
     if (!initOpenSLES()) {
         LOGE("Failed to initialize OpenSL ES, falling back to simulation mode");
     }
@@ -25,7 +43,7 @@ AndroidEngine::AndroidEngine(Dart_Port sampleRateCallbackPort) {
     // Notify Dart about sample rate
     callbackToDartInt32(sampleRateCallbackPort, kSampleRate);
     
-    LOGI("AndroidEngine initialized: %dHz, %d channels, %d frames buffer", 
+    LOGI("AndroidEngine initialized: %dHz, %d channels, %d frames buffer (optimized)", 
          kSampleRate, kChannelCount, kBufferSizeFrames);
 }
 
@@ -33,14 +51,30 @@ AndroidEngine::~AndroidEngine() {
     pause();
     cleanupOpenSLES();
     
-    // Clean up audio buffers
+    // Clean up aligned audio buffers
     for (int i = 0; i < kNumBuffers; ++i) {
-        delete[] mAudioBuffers[i];
+        if (mAudioBuffers[i]) {
+            free(mAudioBuffers[i]);  // Use free() for posix_memalign allocated memory
+            mAudioBuffers[i] = nullptr;
+        }
     }
-    delete[] mTempFloatBuffer;
+    
+    if (mTempFloatBuffer) {
+        free(mTempFloatBuffer);  // Use free() for posix_memalign allocated memory
+        mTempFloatBuffer = nullptr;
+    }
     
     if (mAudioThread.joinable()) {
         mAudioThread.join();
+    }
+    
+    // Log performance statistics
+    uint64_t totalFrames = mTotalFrames.load();
+    uint64_t droppedFrames = mDroppedFrames.load();
+    if (totalFrames > 0) {
+        double dropRate = (double)droppedFrames / totalFrames * 100.0;
+        LOGI("Audio performance: %.2f%% dropped frames (%llu/%llu)", 
+             dropRate, droppedFrames, totalFrames);
     }
 }
 
@@ -216,45 +250,89 @@ void AndroidEngine::cleanupOpenSLES() {
     }
 }
 
+// Optimized float to int16 conversion with SIMD-friendly operations
+inline void AndroidEngine::convertFloatToInt16(const float* input, int16_t* output, int numSamples) noexcept {
+    // Use restrict keyword for compiler optimization hints
+    const float* __restrict__ src = input;
+    int16_t* __restrict__ dst = output;
+    
+    // SIMD-optimized conversion when possible
+    #ifdef __ARM_NEON__
+    // Process 4 samples at a time with NEON
+    const int vectorSamples = numSamples & ~3;  // Round down to multiple of 4
+    for (int i = 0; i < vectorSamples; i += 4) {
+        float32x4_t samples = vld1q_f32(&src[i]);
+        
+        // Clamp to [-1.0, 1.0]
+        samples = vmaxq_f32(samples, vdupq_n_f32(-1.0f));
+        samples = vminq_f32(samples, vdupq_n_f32(1.0f));
+        
+        // Scale and convert to int16
+        samples = vmulq_f32(samples, vdupq_n_f32(32767.0f));
+        int32x4_t int32_samples = vcvtq_s32_f32(samples);
+        int16x4_t int16_samples = vmovn_s32(int32_samples);
+        
+        vst1_s16(&dst[i], int16_samples);
+    }
+    
+    // Handle remaining samples
+    for (int i = vectorSamples; i < numSamples; ++i) {
+        float sample = src[i];
+        sample = std::max(-1.0f, std::min(1.0f, sample));
+        dst[i] = static_cast<int16_t>(sample * 32767.0f);
+    }
+    #else
+    // Fallback scalar implementation
+    for (int i = 0; i < numSamples; ++i) {
+        float sample = src[i];
+        sample = std::max(-1.0f, std::min(1.0f, sample));
+        dst[i] = static_cast<int16_t>(sample * 32767.0f);
+    }
+    #endif
+}
+
 void AndroidEngine::playerCallback(SLAndroidSimpleBufferQueueItf bq, void* context) {
     AndroidEngine* engine = static_cast<AndroidEngine*>(context);
     
-    // Get current int16 buffer and temp float buffer
-    int16_t* int16Buffer = engine->mAudioBuffers[engine->mCurrentBuffer];
+    // Performance monitoring
+    engine->mTotalFrames.fetch_add(1);
+    
+    // Get current buffer index atomically
+    int currentBufferIndex = engine->mCurrentBuffer.load();
+    int16_t* int16Buffer = engine->mAudioBuffers[currentBufferIndex];
     float* floatBuffer = engine->mTempFloatBuffer;
     
-    // Clear float buffer first
-    memset(floatBuffer, 0, kBufferSizeFrames * kChannelCount * sizeof(float));
+    // Zero out float buffer efficiently
+    const size_t floatBufferBytes = kBufferSizeFrames * kChannelCount * sizeof(float);
+    memset(floatBuffer, 0, floatBufferBytes);
     
     // Only render audio if playing, otherwise send silence
-    if (engine->mIsPlaying.load()) {
+    if (engine->mIsPlaying.load(std::memory_order_relaxed)) {
         try {
             // Render audio through the mixer to float buffer
             engine->mSchedulerMixer.renderAudio(floatBuffer, kBufferSizeFrames);
         } catch (const std::exception& e) {
             LOGE("Error rendering audio: %s", e.what());
+            engine->mDroppedFrames.fetch_add(1);
             // Continue with silence
         }
     }
     
-    // Convert float to int16 for OpenSL ES
+    // Convert float to int16 using optimized function
     const int totalSamples = kBufferSizeFrames * kChannelCount;
-    for (int i = 0; i < totalSamples; ++i) {
-        float sample = floatBuffer[i];
-        // Clamp and convert to int16
-        if (sample > 1.0f) sample = 1.0f;
-        if (sample < -1.0f) sample = -1.0f;
-        int16Buffer[i] = static_cast<int16_t>(sample * 32767.0f);
-    }
+    engine->convertFloatToInt16(floatBuffer, int16Buffer, totalSamples);
     
     // Enqueue buffer
-    SLresult result = (*bq)->Enqueue(bq, int16Buffer, kBufferSizeFrames * kChannelCount * sizeof(int16_t));
+    SLresult result = (*bq)->Enqueue(bq, int16Buffer, 
+                                    kBufferSizeFrames * kChannelCount * sizeof(int16_t));
     if (SL_RESULT_SUCCESS != result) {
         LOGE("Failed to enqueue OpenSL ES buffer, result: %d", result);
+        engine->mDroppedFrames.fetch_add(1);
     }
     
-    // Switch to next buffer
-    engine->mCurrentBuffer = (engine->mCurrentBuffer + 1) % kNumBuffers;
+    // Switch to next buffer atomically
+    int nextBuffer = (currentBufferIndex + 1) % kNumBuffers;
+    engine->mCurrentBuffer.store(nextBuffer, std::memory_order_relaxed);
 }
 
 void AndroidEngine::audioThreadFunc() {
