@@ -5,6 +5,7 @@
 #include "Scheduler/BaseScheduler.h"
 #include "Scheduler/SchedulerEvent.h"
 #include "CallbackManager/CallbackManager.h"
+#include "Utils/Logging.h"
 
 // Only include SfizzSamplerInstrument if sfizz is available
 #if defined(SFIZZ_AVAILABLE) && SFIZZ_AVAILABLE
@@ -13,10 +14,12 @@
 
 std::unique_ptr<AndroidEngine> engine;
 
-void check_engine() {
+bool check_engine() {
     if (engine == nullptr) {
-        throw std::runtime_error("Engine is not set up. Ensure that setup_engine() is called before calling this method.");
+        LOGE("Engine is not set up. Ensure that setup_engine() is called before calling this method.");
+        return false;
     }
+    return true;
 }
 
 void setInstrumentOutputFormat(IInstrument* instrument) {
@@ -40,7 +43,10 @@ extern "C" {
 
     __attribute__((visibility("default"))) __attribute__((used))
     void add_track_sf2(const char* filename, bool isAsset, int32_t presetIndex, Dart_Port callbackPort) {
-        check_engine();
+        if (!check_engine()) {
+            callbackToDartInt32(callbackPort, -1);
+            return;
+        }
 
         // Use a detached thread to avoid blocking the calling thread
         std::thread([=]() {
@@ -66,7 +72,10 @@ extern "C" {
     __attribute__((visibility("default"))) __attribute__((used))
     void add_track_sfz(const char* filename, const char* tuningFilename, Dart_Port callbackPort) {
 #if defined(SFIZZ_AVAILABLE) && SFIZZ_AVAILABLE
-        check_engine();
+        if (!check_engine()) {
+            callbackToDartInt32(callbackPort, -1);
+            return;
+        }
 
         std::thread([=]() {
             auto sfzInstrument = new SfizzSamplerInstrument();
@@ -93,7 +102,10 @@ extern "C" {
     __attribute__((visibility("default"))) __attribute__((used))
     void add_track_sfz_string(const char* sampleRoot, const char* sfzString, const char* tuningString, Dart_Port callbackPort) {
 #if defined(SFIZZ_AVAILABLE) && SFIZZ_AVAILABLE
-        check_engine();
+        if (!check_engine()) {
+            callbackToDartInt32(callbackPort, -1);
+            return;
+        }
 
         std::thread([=]() {
             auto sfzInstrument = new SfizzSamplerInstrument();
@@ -119,47 +131,62 @@ extern "C" {
 
 __attribute__((visibility("default"))) __attribute__((used))
     void remove_track(track_index_t trackIndex) {
-        check_engine();
+        if (!check_engine()) {
+            return;
+        }
 
         engine->mSchedulerMixer.removeTrack(trackIndex);
     }
 
     __attribute__((visibility("default"))) __attribute__((used))
     void reset_track(track_index_t trackIndex) {
-        check_engine();
+        if (!check_engine()) {
+            return;
+        }
 
         engine->mSchedulerMixer.resetTrack(trackIndex);
     }
 
     __attribute__((visibility("default"))) __attribute__((used))
     float get_track_volume(track_index_t trackIndex) {
-        check_engine();
+        if (!check_engine()) {
+            return 0.0f;
+        }
 
         return engine->mSchedulerMixer.getLevel(trackIndex);
     }
 
     __attribute__((visibility("default"))) __attribute__((used))
     int32_t get_position() {
-        check_engine();
+        if (!check_engine()) {
+            return 0;
+        }
 
         return engine->mSchedulerMixer.getPosition();
     }
 
     __attribute__((visibility("default"))) __attribute__((used))
     uint64_t get_last_render_time_us() {
-        check_engine();
+        if (!check_engine()) {
+            return 0;
+        }
 
         return engine->mSchedulerMixer.getLastRenderTimeUs();
     }
 
     __attribute__((visibility("default"))) __attribute__((used))
     uint32_t get_buffer_available_count(track_index_t trackIndex) {
+        if (!check_engine()) {
+            return 0;
+        }
         return engine->mSchedulerMixer.getBufferAvailableCount(trackIndex);
     }
 
     __attribute__((visibility("default"))) __attribute__((used))
     void handle_events_now(track_index_t trackIndex, const uint8_t* eventData, int32_t eventsCount) {
-        check_engine();
+        if (!check_engine()) {
+            return;
+        }
 
         SchedulerEvent events[eventsCount];
 
@@ -170,7 +197,9 @@ __attribute__((visibility("default"))) __attribute__((used))
 
     __attribute__((visibility("default"))) __attribute__((used))
     int32_t schedule_events(track_index_t trackIndex, const uint8_t* eventData, int32_t eventsCount) {
-        check_engine();
+        if (!check_engine()) {
+            return -1;
+        }
 
         SchedulerEvent events[eventsCount];
 
@@ -181,21 +210,27 @@ __attribute__((visibility("default"))) __attribute__((used))
 
     __attribute__((visibility("default"))) __attribute__((used))
     void clear_events(track_index_t trackIndex, position_frame_t fromFrame) {
-        check_engine();
+        if (!check_engine()) {
+            return;
+        }
 
         return engine->mSchedulerMixer.clearEvents(trackIndex, fromFrame);
     }
 
     __attribute__((visibility("default"))) __attribute__((used))
     void engine_play() {
-        check_engine();
+        if (!check_engine()) {
+            return;
+        }
 
         engine->play();
     }
 
     __attribute__((visibility("default"))) __attribute__((used))
     void engine_pause() {
-        check_engine();
+        if (!check_engine()) {
+            return;
+        }
 
         engine->pause();
     }

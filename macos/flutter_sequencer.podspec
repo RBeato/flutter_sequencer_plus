@@ -39,7 +39,7 @@ Pod::Spec.new do |s|
     'EXCLUDED_ARCHS[sdk=macosx*]' => 'i386',
     'ENABLE_TESTABILITY' => 'YES',
     'STRIP_STYLE' => 'non-global',
-    'HEADER_SEARCH_PATHS' => '$(inherited) $(PODS_TARGET_SRCROOT)/third_party/sfizz/src $(PODS_ROOT)/flutter_sequencer/third_party/sfizz/src',
+    'HEADER_SEARCH_PATHS' => '$(inherited) $(PODS_TARGET_SRCROOT)/Classes $(PODS_TARGET_SRCROOT)/third_party/sfizz/src $(PODS_ROOT)/flutter_sequencer/third_party/sfizz/src',
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++2a',
     'CLANG_CXX_LIBRARY' => 'libc++',
     'OTHER_CPLUSPLUSFLAGS' => '$(inherited) -std=c++2a -fmodules -fcxx-modules',
@@ -51,7 +51,7 @@ Pod::Spec.new do |s|
   
   # User target configuration
   s.user_target_xcconfig = {
-    'HEADER_SEARCH_PATHS' => '$(inherited) $(PODS_ROOT)/flutter_sequencer/third_party/sfizz/src'
+    'HEADER_SEARCH_PATHS' => '$(inherited) $(PODS_ROOT)/flutter_sequencer/Classes $(PODS_ROOT)/flutter_sequencer/third_party/sfizz/src'
   }
   
   s.swift_version = '5.0'

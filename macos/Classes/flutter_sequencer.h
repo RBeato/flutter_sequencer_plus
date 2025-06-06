@@ -3,9 +3,7 @@
 
 #import <Foundation/Foundation.h>
 
-// Include all public headers here
+// Basic types and common headers
 #import "CommonTypes.h"
-#import "Scheduler/SchedulerEvent.h"
-#import "Scheduler/BaseScheduler.h"
 
 #endif /* flutter_sequencer_h */

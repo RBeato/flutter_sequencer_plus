@@ -1,6 +1,5 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
-#import <CoreAudioKit/AudioUnitViewController.h>
 
 NS_ASSUME_NONNULL_BEGIN
 

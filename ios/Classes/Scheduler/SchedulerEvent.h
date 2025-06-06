@@ -1,6 +1,8 @@
 #ifndef SchedulerEvent_h
 #define SchedulerEvent_h
 
+#include <stdint.h>
+
 typedef uint32_t position_frame_t;
 
 const int SCHEDULER_EVENT_DATA_SIZE = 8;
