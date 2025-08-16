@@ -18,6 +18,7 @@ extern "C" {
 #include "Scheduler/Buffer.h"
 #include "Scheduler/SchedulerEvent.h"
 #include "IInstrument/IInstrument.h"
+#include "AudioUnit/Sfizz/SfizzDSPKernelAdapter.h"
 
 #ifdef __cplusplus
 }

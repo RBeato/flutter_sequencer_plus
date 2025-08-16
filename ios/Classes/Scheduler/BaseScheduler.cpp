@@ -26,17 +26,32 @@ void BaseScheduler::removeTrack(track_index_t trackIndex) {
 }
 
 void BaseScheduler::handleEventsNow(track_index_t trackIndex, const SchedulerEvent* events, uint32_t eventsCount) {
+    // Safety check
+    if (mBufferMap.find(trackIndex) == mBufferMap.end()) {
+        return;
+    }
+    
     for (uint32_t i = 0; i < eventsCount; i++) {
         handleEvent(trackIndex, events[i], 0);
     }
 }
 
 uint32_t BaseScheduler::scheduleEvents(track_index_t trackIndex, const SchedulerEvent* events, uint32_t eventsCount) {
+    // Safety check
+    if (mBufferMap.find(trackIndex) == mBufferMap.end()) {
+        return 0;
+    }
+    
     // Events must come after anything already in the buffer and be sorted by frame, ascending.
     return mBufferMap[trackIndex]->add(events, eventsCount);
 };
 
 void BaseScheduler::clearEvents(track_index_t trackIndex, position_frame_t fromFrame) {
+    // Safety check
+    if (mBufferMap.find(trackIndex) == mBufferMap.end()) {
+        return;
+    }
+    
     mBufferMap[trackIndex]->clearAfter(fromFrame);
 };
 
@@ -53,20 +68,27 @@ void BaseScheduler::pause() {
 };
 
 void BaseScheduler::resetTrack(track_index_t trackIndex) {
-    SchedulerEvent events[128];
-    for (uint8_t noteNumber = 0; noteNumber < 128; noteNumber++) {
-        events[noteNumber].frame = 0;
-        events[noteNumber].type = MIDI_EVENT;
-        events[noteNumber].data[0] = 128;
-        events[noteNumber].data[1] = noteNumber;
-        events[noteNumber].data[2] = 0;
+    // Safety check: ensure track exists in buffer map
+    if (mBufferMap.find(trackIndex) == mBufferMap.end()) {
+        return;
     }
-    handleEventsNow(trackIndex, std::as_const(events), 128);
-
+    
+    // MINIMAL RESET: Don't send ANY MIDI events during reset to prevent corruption
+    // Just call the platform-specific reset and clear the buffer
+    
+    // Clear the event buffer for this track
+    mBufferMap[trackIndex]->clear();
+    
+    // Call the platform-specific reset WITHOUT sending MIDI events
     onResetTrack(trackIndex);
 }
 
 uint32_t BaseScheduler::getBufferAvailableCount(track_index_t trackIndex) {
+    // Safety check
+    if (mBufferMap.find(trackIndex) == mBufferMap.end()) {
+        return 0;
+    }
+    
     return mBufferMap[trackIndex]->availableCount();
 }
 

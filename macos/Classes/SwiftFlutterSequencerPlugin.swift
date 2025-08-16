@@ -4,9 +4,6 @@ import AudioToolbox
 import CoreAudio
 import AVFoundation
 
-// Import all necessary types through the framework module
-import flutter_sequencer
-
 enum PluginError: Error {
     case engineNotReady
 }
@@ -20,7 +17,7 @@ public class SwiftFlutterSequencerPlugin: NSObject, FlutterPlugin {
     public static var instance: SwiftFlutterSequencerPlugin!
     
     public static func register(with registrar: FlutterPluginRegistrar) {
-        let channel = FlutterMethodChannel(name: "flutter_sequencer", binaryMessenger: registrar.messenger())
+        let channel = FlutterMethodChannel(name: "flutter_sequencer", binaryMessenger: registrar.messenger)
         let instance = SwiftFlutterSequencerPlugin()
         instance.registrar = registrar
         registrar.addMethodCallDelegate(instance, channel: channel)
@@ -47,8 +44,7 @@ public class SwiftFlutterSequencerPlugin: NSObject, FlutterPlugin {
             listAudioUnits { result($0) }
         } else if (call.method == "addTrackAudioUnit") {
             let args = call.arguments as! [String: Any]
-            let audioUnitId = args["id"] as! String
-                  let audioUnitId = args["id"] as? String else {
+            guard let audioUnitId = args["id"] as? String else {
                 result(FlutterError(code: "INVALID_ARGUMENTS", message: "Missing id", details: nil))
                 return
             }

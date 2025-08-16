@@ -1,8 +1,5 @@
 import Foundation
 
-// Import all necessary types through the framework module
-import flutter_sequencer
-
 func scan<
   S : Sequence, U
 >(_ seq: S, _ initial: U, _ combine: (U, S.Iterator.Element) -> U) -> [U] {

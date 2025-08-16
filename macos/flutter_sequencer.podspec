@@ -21,6 +21,9 @@ Pod::Spec.new do |s|
   s.public_header_files = 'Classes/**/*.h'
   s.preserve_paths = 'third_party/sfizz/src/**/*'
   
+  # Disable module map to avoid conflicts
+  s.module_map = false
+  
   # Dependencies
   s.dependency 'FlutterMacOS'
   s.static_framework = true
@@ -35,7 +38,7 @@ Pod::Spec.new do |s|
   
   # Pod target configuration
   s.pod_target_xcconfig = {
-    'DEFINES_MODULE' => 'YES',
+    'DEFINES_MODULE' => 'NO',
     'EXCLUDED_ARCHS[sdk=macosx*]' => 'i386',
     'ENABLE_TESTABILITY' => 'YES',
     'STRIP_STYLE' => 'non-global',
@@ -44,7 +47,8 @@ Pod::Spec.new do |s|
     'CLANG_CXX_LIBRARY' => 'libc++',
     'OTHER_CPLUSPLUSFLAGS' => '$(inherited) -std=c++2a -fmodules -fcxx-modules',
     'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) SFIZZ_AUDIOUNIT=1',
-    'OTHER_SWIFT_FLAGS' => '$(inherited) -DSFIZZ_AUDIOUNIT',
+    'OTHER_SWIFT_FLAGS' => '$(inherited) -DSFIZZ_AUDIOUNIT -import-objc-header $(PODS_TARGET_SRCROOT)/Classes/FlutterSequencer-Bridging-Header.h',
+    'SWIFT_OBJC_BRIDGING_HEADER' => '$(PODS_TARGET_SRCROOT)/Classes/FlutterSequencer-Bridging-Header.h',
     'ENABLE_BITCODE' => 'NO',
     'APPLICATION_EXTENSION_API_ONLY' => 'NO'
   }

@@ -14,7 +14,7 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral
 
 SPEC CHECKSUMS:
-  flutter_sequencer: b46d8c708e0b90600d4dc79db99ed041b235e1ab
+  flutter_sequencer: f370bc4d3c8b8e778321ba7584202c9de397ebce
   FlutterMacOS: 8f6f14fa908a6fb3fba0cd85dbd81ec4b251fb24
 
 PODFILE CHECKSUM: 8c47cd799b9cdcf6ba8db786cf76be06bc40d4e1

@@ -11,9 +11,12 @@ Pod::Spec.new do |s|
   s.license          = { :type => 'MIT', :file => '../LICENSE' }
   s.author           = { 'Mike Perri' => 'mikep@hey.com', 'Rodrigo Souza' => 'rbsou@hey.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*'
+  s.source_files = 'Classes/**/*.{h,m,mm,swift,cpp,hpp}'
   s.public_header_files = 'Classes/**/*.h'
   s.preserve_paths = 'third_party/sfizz/src/**/*'
+  
+  # Ensure specific headers are public
+  s.private_header_files = []
   
   s.dependency 'Flutter'
   s.static_framework = true
@@ -24,20 +27,31 @@ Pod::Spec.new do |s|
   
   # Pod target configuration
   s.pod_target_xcconfig = {
-    'DEFINES_MODULE' => 'YES',
+    'DEFINES_MODULE' => 'NO',
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
     'ENABLE_TESTABILITY' => 'YES',
     'STRIP_STYLE' => 'non-global',
-    'HEADER_SEARCH_PATHS' => '$(inherited) $(PODS_TARGET_SRCROOT)/third_party/sfizz/src $(PODS_ROOT)/flutter_sequencer/third_party/sfizz/src',
-    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++2a',
+    'HEADER_SEARCH_PATHS' => '$(inherited) $(PODS_TARGET_SRCROOT)/third_party/sfizz/src $(PODS_ROOT)/flutter_sequencer/third_party/sfizz/src $(PODS_TARGET_SRCROOT)/Classes $(PODS_TARGET_SRCROOT)/Classes/AudioUnit/Sfizz',
+    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
     'CLANG_CXX_LIBRARY' => 'libc++',
-    'OTHER_CPLUSPLUSFLAGS' => '$(inherited) -std=c++2a -fmodules -fcxx-modules'
+    'OTHER_CPLUSPLUSFLAGS' => '$(inherited) -std=c++17',
+    'CLANG_ENABLE_MODULES' => 'NO',
+    'SWIFT_VERSION' => '5.0',
+    'SWIFT_COMPILATION_MODE' => 'wholemodule',
+    'SWIFT_ENABLE_LIBRARY_EVOLUTION' => 'NO'
   }
   
   # User target configuration
   s.user_target_xcconfig = { 
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64',
-    'HEADER_SEARCH_PATHS' => '$(inherited) $(PODS_ROOT)/flutter_sequencer/third_party/sfizz/src'
+    'HEADER_SEARCH_PATHS' => '$(inherited) $(PODS_ROOT)/flutter_sequencer/third_party/sfizz/src',
+    'ENABLE_BITCODE' => 'NO',
+    'VALID_ARCHS' => 'arm64 x86_64',
+    'BUILD_LIBRARY_FOR_DISTRIBUTION' => 'NO',
+    'OTHER_LDFLAGS' => '$(inherited) -framework AudioToolbox -framework AVFoundation -framework CoreAudio',
+    'CLANG_ENABLE_MODULES' => 'NO',
+    'SWIFT_ENABLE_LIBRARY_EVOLUTION' => 'NO',
+    'SWIFT_COMPILATION_MODE' => 'wholemodule'
   }
   
   s.swift_version = '5.0'

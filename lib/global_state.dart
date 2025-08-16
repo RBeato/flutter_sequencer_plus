@@ -26,6 +26,42 @@ class GlobalState {
   Timer? _topOffTimer;
   int lastTickInBuffer = 0;
   final onEngineReadyCallbacks = <Function()>[];
+  
+  // Position tracking
+  int _positionFrames = 0;
+  Timer? _positionTimer;
+  DateTime? _lastPositionUpdate;
+  
+  int get currentPosition {
+    if (_lastPositionUpdate != null && _getIsPlaying()) {
+      // Estimate position based on elapsed time
+      final elapsed = DateTime.now().difference(_lastPositionUpdate!);
+      final elapsedFrames = (elapsed.inMicroseconds * (sampleRate ?? 44100) / 1000000).round();
+      return _positionFrames + elapsedFrames;
+    }
+    return _positionFrames;
+  }
+  
+  void _startPositionTracking() {
+    _lastPositionUpdate = DateTime.now();
+    _positionTimer?.cancel();
+    _positionTimer = Timer.periodic(const Duration(milliseconds: 10), (_) {
+      if (_getIsPlaying()) {
+        _positionFrames = currentPosition;
+        _lastPositionUpdate = DateTime.now();
+      }
+    });
+  }
+  
+  void _stopPositionTracking() {
+    _positionTimer?.cancel();
+    _positionTimer = null;
+  }
+  
+  void resetPosition() {
+    _positionFrames = 0;
+    _lastPositionUpdate = null;
+  }
 
   /// Calls a function when the sequencer engine is ready. Trying to play the
   /// sequence won't do anything until the engine is ready.
@@ -120,14 +156,26 @@ class GlobalState {
   }
 
   void _setupEngine() async {
-    sampleRate = await NativeBridge.doSetup();
-    isEngineReady = true;
-    for (var callback in onEngineReadyCallbacks) {
-      callback();
-    }
+    print('[DEBUG] GlobalState: Starting engine setup...');
+    try {
+      sampleRate = await NativeBridge.doSetup();
+      print('[DEBUG] GlobalState: Engine setup completed with sample rate: $sampleRate');
+      isEngineReady = true;
+      for (var callback in onEngineReadyCallbacks) {
+        callback();
+      }
 
-    if (keepEngineRunning) {
-      NativeBridge.play();
+      if (keepEngineRunning) {
+        NativeBridge.play();
+      }
+    } catch (e) {
+      print('[ERROR] GlobalState: Engine setup failed: $e');
+      // Set a default sample rate so the app doesn't hang
+      sampleRate = 44100;
+      isEngineReady = true;
+      for (var callback in onEngineReadyCallbacks) {
+        callback();
+      }
     }
   }
 
@@ -138,6 +186,7 @@ class GlobalState {
   void _playEngine() {
     // All sequences were paused, play engine
     if (!keepEngineRunning) NativeBridge.play();
+    _startPositionTracking();
 
     if (_topOffTimer != null) _topOffTimer!.cancel();
     _topOffTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) {
@@ -153,6 +202,7 @@ class GlobalState {
     if (!keepEngineRunning) NativeBridge.pause();
 
     if (_topOffTimer != null) _topOffTimer!.cancel();
+    _stopPositionTracking();
   }
 
   /// Gets all tracks in all sequences.

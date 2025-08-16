@@ -9,7 +9,7 @@ Adapter object providing a Swift-accessible interface to the filter's underlying
 #import <CoreAudioKit/AUViewController.h>
 #import <filesystem>
 #import "SfizzDSPKernel.hpp"
-#import "BufferedAudioBus.hpp"
+#import <AudioUnit/BufferedAudioBus.hpp>
 #import "SfizzDSPKernelAdapter.h"
 
 @implementation SfizzDSPKernelAdapter {

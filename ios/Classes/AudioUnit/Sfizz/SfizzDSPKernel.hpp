@@ -8,7 +8,7 @@ A DSPKernel subclass implementing the realtime signal processing portion of the 
 #define SfizzDSPKernel_hpp
 
 #ifdef __cplusplus
-#import "DSPKernel.hpp"
+#import <AudioUnit/DSPKernel.hpp>
 #import "SfizzSamplerInstrument.h"
 #import <vector>
 #import <iostream>

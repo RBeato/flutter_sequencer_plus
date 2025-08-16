@@ -2,12 +2,6 @@ import Foundation
 import AVFoundation
 import FlutterMacOS
 
-// Import all necessary types through the framework module
-import flutter_sequencer
-
-// Import AudioUnit utilities
-import AudioUnitUtils
-
 public class CocoaEngine {
     var scheduler: UnsafeMutableRawPointer!
     
@@ -168,7 +162,8 @@ public class CocoaEngine {
         unsafeAvAudioUnits[trackIndex] = avAudioUnit
         
         // Update scheduler
-        SchedulerSetAudioUnit(scheduler, trackIndex, avAudioUnit.audioUnit)
+        // TODO: Implement SchedulerSetAudioUnit functionality
+        // SchedulerSetAudioUnit(scheduler, trackIndex, avAudioUnit.audioUnit)
     }
     
     private func normalizePath(_ path: String, isAsset: Bool) -> String? {

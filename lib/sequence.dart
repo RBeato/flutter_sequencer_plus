@@ -105,9 +105,7 @@ class Sequence {
   void pause() {
     if (!globalState.isEngineReady) return;
 
-    for (var track in _tracks.values) {
-      NativeBridge.resetTrack(track.id);
-    }
+    // MINIMAL PAUSE: Just pause the sequence, don't reset tracks
     globalState.pauseSequence(id);
   }
 
@@ -115,11 +113,8 @@ class Sequence {
   void stop() {
     pause();
     setBeat(0.0);
-    for (var track in _tracks.values) {
-      List.generate(128, (noteNumber) {
-        track.stopNoteNow(noteNumber: noteNumber);
-      });
-    }
+    GlobalState().resetPosition();
+    // MINIMAL STOP: Don't send individual note-offs that can cause corruption
   }
 
   /// Sets the tempo.
@@ -196,9 +191,7 @@ class Sequence {
   void setBeat(double beat) {
     if (!globalState.isEngineReady) return;
 
-    for (var track in _tracks.values) {
-      NativeBridge.resetTrack(track.id);
-    }
+    // MINIMAL setBeat: Don't reset tracks to avoid corruption
 
     final leadFrames =
         getIsPlaying() ? min(_getFramesRendered(), LEAD_FRAMES) : 0;

@@ -5,9 +5,12 @@
 
 @interface SfizzAU ()
 {
+    // Initialize _isInitialized in the constructor
+    std::atomic_bool _isInitialized;
+
     std::unique_ptr<sfz::Sfizz> _sfz;
     AVAudioFormat *_format;
-    std::atomic_bool _isInitialized{false};
+    std::atomic_bool _isInitialized;
 }
 
 @property AUAudioUnitBus *outputBus;
@@ -131,7 +134,7 @@
         // Process MIDI events
         AURenderEvent *event = (AURenderEvent *)realtimeEventListHead;
         while (event != NULL) {
-            if (event->head.eventType == AURenderEventTypeMIDI) {
+            if (event->head.eventType == AURenderEventMIDI) {
                 AUMIDIEvent midiEvent = event->MIDI;
                 const uint8_t *midiData = midiEvent.data;
                 
@@ -170,7 +173,7 @@
         
         // Get output buffers
         float *outputL = (float *)outputData->mBuffers[0].mData;
-        float *outputR = outputData->mNumberChannels > 1 ? (float *)outputData->mBuffers[1].mData : outputL;
+        float *outputR = outputData->mNumberBuffers > 1 ? (float *)outputData->mBuffers[1].mData : outputL;
         
         // Clear output
         memset(outputL, 0, frameCount * sizeof(float));
@@ -179,7 +182,8 @@
         }
         
         // Render audio
-        sfz->renderBlock(0, outputL, outputR, frameCount);
+        float* outputs[2] = {outputL, outputR};
+        sfz->renderBlock(outputs, frameCount, outputData->mNumberBuffers);
         
         return noErr;
     };

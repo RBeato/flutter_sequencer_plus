@@ -6,6 +6,8 @@ Dart_PostCObjectType dartPostCObject = NULL;
 
 void RegisterDart_PostCObject(Dart_PostCObjectType _dartPostCObject) {
     dartPostCObject = _dartPostCObject;
+    printf("[DEBUG] CallbackManager: RegisterDart_PostCObject called, dartPostCObject is now %s\n", 
+           dartPostCObject ? "VALID" : "NULL");
 }
 
 void callbackToDartBool(Dart_Port callback_port, bool value) {
@@ -22,15 +24,22 @@ void callbackToDartBool(Dart_Port callback_port, bool value) {
 }
 
 void callbackToDartInt32(Dart_Port callback_port, int32_t value) {
-    if (dartPostCObject == NULL) return;
+    printf("[DEBUG] CallbackManager: callbackToDartInt32 called, port=%lld value=%d dartPostCObject=%s\n", 
+           callback_port, value, dartPostCObject ? "VALID" : "NULL");
+    
+    if (dartPostCObject == NULL) {
+        printf("[ERROR] CallbackManager: dartPostCObject is NULL! Cannot send callback.\n");
+        return;
+    }
     
     Dart_CObject dart_object;
     dart_object.type = Dart_CObject_kInt32;
     dart_object.value.as_int32 = value;
     
     bool result = dartPostCObject(callback_port, &dart_object);
+    printf("[DEBUG] CallbackManager: dartPostCObject result=%s\n", result ? "SUCCESS" : "FAILED");
     if (!result) {
-        printf("call from native to Dart failed, result was: %d\n", result);
+        printf("[ERROR] CallbackManager: call from native to Dart failed, result was: %d\n", result);
     }
 }
 

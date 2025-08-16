@@ -38,14 +38,17 @@ func withArrayOfCStrings<R>(
   }
 }
 
-public func swiftCallbackToDartStrArray(callbackPort: Dart_Port, values: [String]) -> Void {
+func swiftCallbackToDartStrArray(callbackPort: Int64, values: [String]) -> Void {
     withArrayOfCStrings(values) { (cStrings: [UnsafeMutablePointer<CChar>?]) in
         var cStrings2 = cStrings
         
-        callbackToDartStrArray(
-           Int64(callbackPort),
-           Int32(values.count),
-           &cStrings2
-        )
+        cStrings2.withUnsafeBufferPointer { buffer in
+            let constBuffer = UnsafeRawPointer(buffer.baseAddress!).bindMemory(to: UnsafePointer<CChar>?.self, capacity: buffer.count)
+            callbackToDartStrArray(
+                callbackPort,
+                constBuffer,
+                Int32(values.count)
+            )
+        }
     }
 }

@@ -18,21 +18,46 @@ class Cell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Enhanced visual feedback for current step
+    final baseColor = velocity > 0 
+        ? (isCurrentStep ? Colors.lightBlue : Colors.pink)
+        : (isCurrentStep ? Colors.grey.shade700 : Colors.black);
+    
+    final highlightColor = isCurrentStep 
+        ? (velocity > 0 ? Colors.cyan : Colors.white30)
+        : baseColor;
+    
+    final borderColor = isCurrentStep 
+        ? Colors.cyan 
+        : Colors.white70;
+    
+    final borderWidth = isCurrentStep ? 2.0 : 1.0;
+    
     final box = Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: Color.lerp(isCurrentStep ? Colors.white30 : Colors.black,
-            isCurrentStep ? Colors.blue : Colors.pink, velocity),
-        border: Border.all(color: Colors.white70),
+        color: Color.lerp(Colors.black, highlightColor, velocity > 0 ? velocity : (isCurrentStep ? 0.3 : 0)),
+        border: Border.all(color: borderColor, width: borderWidth),
+        // Add glow effect for current step
+        boxShadow: isCurrentStep ? [
+          BoxShadow(
+            color: Colors.cyan.withValues(alpha: 0.5),
+            blurRadius: 8,
+            spreadRadius: 1,
+          )
+        ] : null,
       ),
       child: Transform(
           transform:
               Matrix4.translationValues(0, (-1 * size * velocity) + 2, 0),
           child: Container(
               width: size,
-              decoration: const BoxDecoration(
-                  border: Border(bottom: BorderSide(color: Colors.white))))),
+              decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(
+                    color: isCurrentStep ? Colors.cyan : Colors.white,
+                    width: isCurrentStep ? 2.0 : 1.0,
+                  ))))),
     );
 
     return GestureDetector(

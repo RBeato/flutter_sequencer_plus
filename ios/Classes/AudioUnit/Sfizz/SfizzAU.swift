@@ -10,6 +10,7 @@ import AudioToolbox
 import AVFoundation
 import CoreAudioKit
 
+
 public class SfizzAU: AUAudioUnit {
 
     private let kernelAdapter: SfizzDSPKernelAdapter
@@ -17,13 +18,13 @@ public class SfizzAU: AUAudioUnit {
     lazy private var inputBusArray: AUAudioUnitBusArray = {
         AUAudioUnitBusArray(audioUnit: self,
                             busType: .input,
-                            busses: [kernelAdapter.inputBus])
+                            busses: [sfizz_adapter_get_input_bus(kernelAdapter).pointee])
     }()
 
     lazy private var outputBusArray: AUAudioUnitBusArray = {
         AUAudioUnitBusArray(audioUnit: self,
                             busType: .output,
-                            busses: [kernelAdapter.outputBus])
+                            busses: [sfizz_adapter_get_output_bus(kernelAdapter).pointee])
     }()
 
     /// The filter's input busses
@@ -40,7 +41,7 @@ public class SfizzAU: AUAudioUnit {
                          options: AudioComponentInstantiationOptions = []) throws {
 
         // Create adapter to communicate to underlying C++ DSP code
-        kernelAdapter = SfizzDSPKernelAdapter()
+        kernelAdapter = createSfizzDSPKernelAdapter()
 
         // Init super class
         try super.init(componentDescription: componentDescription, options: options)
@@ -48,30 +49,32 @@ public class SfizzAU: AUAudioUnit {
 
     public override var maximumFramesToRender: AUAudioFrameCount {
         get {
-            return kernelAdapter.maximumFramesToRender
+            return sfizz_adapter_get_maximum_frames(kernelAdapter)
         }
         set {
             if !renderResourcesAllocated {
-                kernelAdapter.maximumFramesToRender = newValue
+                sfizz_adapter_set_maximum_frames(kernelAdapter, newValue)
             }
         }
     }
 
     public override func allocateRenderResources() throws {
-        if kernelAdapter.outputBus.format.channelCount != kernelAdapter.inputBus.format.channelCount {
+        let inputBus = sfizz_adapter_get_input_bus(kernelAdapter).pointee
+        let outputBus = sfizz_adapter_get_output_bus(kernelAdapter).pointee
+        if outputBus.format.channelCount != inputBus.format.channelCount {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(kAudioUnitErr_FailedInitialization), userInfo: nil)
         }
         try super.allocateRenderResources()
-        kernelAdapter.allocateRenderResources()
+        sfizz_adapter_allocate_render_resources(kernelAdapter)
     }
 
     public override func deallocateRenderResources() {
         super.deallocateRenderResources()
-        kernelAdapter.deallocateRenderResources()
+        sfizz_adapter_deallocate_render_resources(kernelAdapter)
     }
 
     public override var internalRenderBlock: AUInternalRenderBlock {
-        return kernelAdapter.internalRenderBlock()
+        return sfizz_adapter_get_internal_render_block(kernelAdapter)
     }
 
     // Boolean indicating that this AU can process the input audio in-place
@@ -81,11 +84,11 @@ public class SfizzAU: AUAudioUnit {
     }
     
     public func loadSfzFile(path: UnsafePointer<CChar>, tuningPath: UnsafePointer<CChar>) -> Bool {
-        return kernelAdapter.loadSfzFile(path, tuningPath: tuningPath)
+        return sfizz_adapter_load_sfz_file(kernelAdapter, path, tuningPath)
     }
     
     public func loadSfzString(sampleRoot: UnsafePointer<CChar>, sfzString: UnsafePointer<CChar>, tuningString: UnsafePointer<CChar>) -> Bool {
-        return kernelAdapter.loadSfzString(sampleRoot, sfzString: sfzString, tuningString: tuningString)
+        return sfizz_adapter_load_sfz_string(kernelAdapter, sampleRoot, sfzString, tuningString)
     }
     
     public static var componentDescription: AudioComponentDescription = {

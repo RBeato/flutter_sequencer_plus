@@ -1,0 +1,112 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Flutter (Debug - iOS Simulator)",
+            "type": "dart",
+            "request": "launch",
+            "program": "example/lib/main.dart",
+            "args": [
+                "--debug",
+                "--dart-define=FLUTTER_WEB_USE_SKIA=true"
+            ],
+            "deviceId": "ios",
+            "toolArgs": [
+                "-d",
+                "ios"
+            ]
+        },
+        {
+            "name": "Flutter (Debug - iOS Device)",
+            "type": "dart", 
+            "request": "launch",
+            "program": "example/lib/main.dart",
+            "args": [
+                "--debug",
+                "--verbose"
+            ],
+            "deviceId": "ios",
+            "toolArgs": [
+                "-d",
+                "ios",
+                "--verbose"
+            ]
+        },
+        {
+            "name": "Flutter (Debug - Android)",
+            "type": "dart",
+            "request": "launch",
+            "program": "example/lib/main.dart",
+            "args": [
+                "--debug",
+                "--verbose"
+            ],
+            "deviceId": "android",
+            "toolArgs": [
+                "-d",
+                "android",
+                "--verbose"
+            ]
+        },
+        {
+            "name": "Flutter (Release - iOS)",
+            "type": "dart",
+            "request": "launch", 
+            "program": "example/lib/main.dart",
+            "args": [
+                "--release"
+            ],
+            "deviceId": "ios",
+            "toolArgs": [
+                "-d", 
+                "ios",
+                "--release"
+            ]
+        },
+        {
+            "name": "Flutter (Release - Android)",
+            "type": "dart",
+            "request": "launch",
+            "program": "example/lib/main.dart", 
+            "args": [
+                "--release"
+            ],
+            "deviceId": "android",
+            "toolArgs": [
+                "-d",
+                "android", 
+                "--release"
+            ]
+        },
+        {
+            "name": "Flutter (Profile - iOS)",
+            "type": "dart",
+            "request": "launch",
+            "program": "example/lib/main.dart",
+            "args": [
+                "--profile"
+            ],
+            "deviceId": "ios",
+            "toolArgs": [
+                "-d",
+                "ios",
+                "--profile"
+            ]
+        },
+        {
+            "name": "Flutter (Profile - Android)",
+            "type": "dart",
+            "request": "launch",
+            "program": "example/lib/main.dart",
+            "args": [
+                "--profile"
+            ],
+            "deviceId": "android",
+            "toolArgs": [
+                "-d",
+                "android",
+                "--profile"
+            ]
+        }
+    ]
+}

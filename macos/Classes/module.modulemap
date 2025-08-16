@@ -1,5 +1,5 @@
 framework module flutter_sequencer {
-    umbrella header "flutter_sequencer.h"
+    header "CommonTypes.h"
     
     link framework "AudioToolbox"
     link framework "CoreAudio"

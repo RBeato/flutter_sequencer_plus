@@ -45,7 +45,7 @@ class Grid extends StatelessWidget {
                 final cellWidget = Cell(
                   size: cellSize,
                   velocity: velocity,
-                  isCurrentStep: step == currentStep,
+                  isCurrentStep: step == currentStep && currentStep >= 0,
                   onChange: (velocity) => onChange(col, step, velocity),
                 );
 
