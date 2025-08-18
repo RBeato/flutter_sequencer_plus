@@ -75,7 +75,13 @@ class NativeBridge {
     _getTrackVolume = _lib!.lookup<NativeFunction<Float Function(Uint32)>>('get_track_volume');
     _getLastRenderTimeUs = _lib!.lookup<NativeFunction<Uint64 Function()>>('get_last_render_time_us');
     _getBufferAvailableCount = _lib!.lookup<NativeFunction<Uint32 Function(Uint32)>>('get_buffer_available_count');
-    _handleEventsNow = _lib!.lookup<NativeFunction<Void Function(Uint32, Pointer<Uint8>, Uint32)>>('handle_events_now');
+    try {
+      _handleEventsNow = _lib!.lookup<NativeFunction<Void Function(Uint32, Pointer<Uint8>, Uint32)>>('handle_events_now');
+      print('[DEBUG] NativeBridge: Successfully found handle_events_now FFI function');
+    } catch (e) {
+      print('[ERROR] NativeBridge: Failed to find handle_events_now: $e');
+      rethrow;
+    }
     _scheduleEvents = _lib!.lookup<NativeFunction<Uint32 Function(Uint32, Pointer<Uint8>, Uint32)>>('schedule_events');
     _clearEvents = _lib!.lookup<NativeFunction<Void Function(Uint32, Uint32)>>('clear_events');
     _enginePlay = _lib!.lookup<NativeFunction<Void Function()>>('engine_play');
@@ -92,6 +98,14 @@ class NativeBridge {
     print('[DEBUG] NativeBridge: Starting doSetup...');
     try {
       _ensureInitialized();
+      
+      // Setup asset manager for Android (must happen before engine setup)
+      if (Platform.isAndroid) {
+        const channel = MethodChannel('flutter_sequencer');
+        await channel.invokeMethod('setupAssetManager');
+        print('[DEBUG] NativeBridge: Android AssetManager setup completed');
+      }
+      
       print('[DEBUG] NativeBridge: FFI initialized successfully');
 
       final receivePort = ReceivePort();
@@ -296,14 +310,21 @@ class NativeBridge {
     if (events.isEmpty) return 0;
     
     print('[DEBUG] NativeBridge.handleEventsNow: track=$trackIndex events=${events.length}');
-
+    print('[CRITICAL DEBUG] About to call native FFI function handle_events_now');
+    
     _ensureInitialized();
     final serializedData = _serializeEvents(events, sampleRate, tempo);
     final handleEventsNow = _handleEventsNow.asFunction<void Function(int, Pointer<Uint8>, int)>();
-
-    handleEventsNow(trackIndex, serializedData.rawData, serializedData.eventCount);
-
-    malloc.free(serializedData.rawData);
+    
+    try {
+      print('[CRITICAL DEBUG] Calling native handle_events_now with track=$trackIndex, eventCount=${serializedData.eventCount}');
+      handleEventsNow(trackIndex, serializedData.rawData, serializedData.eventCount);
+      print('[CRITICAL DEBUG] Native handle_events_now call completed');
+    } catch (e) {
+      print('[ERROR] Native handle_events_now call failed: $e');
+    } finally {
+      malloc.free(serializedData.rawData);
+    }
     return events.length;
   }
 
@@ -342,34 +363,19 @@ class NativeBridge {
   static _SerializedEventData _serializeEvents(List<SchedulerEvent> events,
       int sampleRate, double tempo) {
     final eventCount = events.length;
-    final bytesPerEvent = 24; // Size of SchedulerEvent in C
+    final bytesPerEvent = SCHEDULER_EVENT_SIZE; // Use correct size from events.dart (16 bytes)
     final rawData = malloc.allocate<Uint8>(eventCount * bytesPerEvent);
 
     for (int i = 0; i < eventCount; i++) {
       final event = events[i];
       final offset = i * bytesPerEvent;
 
-      // Serialize based on event type
-      if (event is MidiEvent) {
-        rawData.elementAt(offset).value = 0; // MIDI event type
-        
-        // Beat (double) - 8 bytes
-        final beatBytes = (event.beat).toDouble();
-        (rawData.cast<Double>().elementAt(offset ~/ 8 + 1)).value = beatBytes;
-        
-        // MIDI data - 3 bytes
-        rawData.elementAt(offset + 16).value = event.midiStatus;
-        rawData.elementAt(offset + 17).value = event.midiData1;
-        rawData.elementAt(offset + 18).value = event.midiData2;
-      } else if (event is VolumeEvent) {
-        rawData.elementAt(offset).value = 1; // Volume event type
-        
-        // Beat (double) - 8 bytes  
-        final beatBytes = (event.beat).toDouble();
-        (rawData.cast<Double>().elementAt(offset ~/ 8 + 1)).value = beatBytes;
-        
-        // Volume (float) - 4 bytes
-        (rawData.cast<Float>().elementAt((offset + 16) ~/ 4)).value = (event.volume ?? 1.0);
+      // Use the correct serializeBytes method from SchedulerEvent
+      final serializedBytes = event.serializeBytes(sampleRate, tempo, 0);
+      
+      // Copy the properly serialized bytes to our raw data buffer
+      for (int j = 0; j < bytesPerEvent; j++) {
+        rawData.elementAt(offset + j).value = serializedBytes.getUint8(j);
       }
     }
 

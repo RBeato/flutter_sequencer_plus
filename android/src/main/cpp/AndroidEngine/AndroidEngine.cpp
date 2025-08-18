@@ -5,6 +5,7 @@
 #include <memory>
 #include <algorithm>
 #include <cstdlib>  // For posix_memalign
+#include <cmath>    // For sinf, M_PI
 
 #ifdef __ARM_NEON__
 #include <arm_neon.h>
@@ -12,6 +13,8 @@
 
 AndroidEngine::AndroidEngine(Dart_Port sampleRateCallbackPort) {
     mSchedulerMixer.setChannelCount(kChannelCount);
+    
+    LOGI("AndroidEngine: Initializing with %d channels, %d Hz sample rate", kChannelCount, kSampleRate);
     
     // Allocate aligned audio buffers for optimal SIMD performance
     const size_t bufferSize = kBufferSizeFrames * kChannelCount;
@@ -311,6 +314,21 @@ void AndroidEngine::playerCallback(SLAndroidSimpleBufferQueueItf bq, void* conte
         try {
             // Render audio through the mixer to float buffer
             engine->mSchedulerMixer.renderAudio(floatBuffer, kBufferSizeFrames);
+            
+            // CRITICAL DEBUG: Check if audio is being rendered
+            static int debugCounter = 0;
+            if (++debugCounter % 2000 == 0) { // Much less frequent - every 2000 frames (~12 seconds)
+                float maxSample = 0.0f;
+                const int totalSamples = kBufferSizeFrames * kChannelCount;
+                for (int i = 0; i < totalSamples; ++i) {
+                    maxSample = std::max(maxSample, std::abs(floatBuffer[i]));
+                }
+                if (maxSample > 0.001f) {
+                    LOGI("AndroidEngine: ✅ Audio activity detected - max sample: %.4f", maxSample);
+                } else {
+                    LOGI("AndroidEngine: ⚠️ Still no audio from instruments (%.6f)", maxSample);
+                }
+            }
         } catch (const std::exception& e) {
             LOGE("Error rendering audio: %s", e.what());
             engine->mDroppedFrames.fetch_add(1);
@@ -318,9 +336,25 @@ void AndroidEngine::playerCallback(SLAndroidSimpleBufferQueueItf bq, void* conte
         }
     }
     
+    // DEBUGGING: Test tone disabled - audio pipeline confirmed working
+    // The "bip" sound confirms OpenSL ES works, now focusing on MIDI->Audio generation
+    
     // Convert float to int16 using optimized function
     const int totalSamples = kBufferSizeFrames * kChannelCount;
     engine->convertFloatToInt16(floatBuffer, int16Buffer, totalSamples);
+    
+    // DEBUG: Check what we're sending to OpenSL ES
+    static int bufferDebugCounter = 0;
+    if (++bufferDebugCounter % 500 == 0) { // Reduced frequency
+        float maxInt16Sample = 0.0f;
+        const int totalSamples = kBufferSizeFrames * kChannelCount;
+        for (int i = 0; i < totalSamples; ++i) {
+            maxInt16Sample = std::max(maxInt16Sample, std::abs((float)int16Buffer[i]));
+        }
+        if (maxInt16Sample > 100.0f) { // Only log if there's actual audio
+            LOGI("AndroidEngine: OpenSL ES output level: %.1f/32767", maxInt16Sample);
+        }
+    }
     
     // Enqueue buffer
     SLresult result = (*bq)->Enqueue(bq, int16Buffer, 
@@ -329,6 +363,7 @@ void AndroidEngine::playerCallback(SLAndroidSimpleBufferQueueItf bq, void* conte
         LOGE("Failed to enqueue OpenSL ES buffer, result: %d", result);
         engine->mDroppedFrames.fetch_add(1);
     }
+    // Success logging removed - OpenSL ES is working fine
     
     // Switch to next buffer atomically
     int nextBuffer = (currentBufferIndex + 1) % kNumBuffers;

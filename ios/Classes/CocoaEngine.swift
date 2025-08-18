@@ -19,27 +19,35 @@ public class CocoaEngine {
         
         print("[DEBUG] CocoaEngine init started")
         
-        // Configure audio session FIRST
+        // PERFORMANCE OPTIMIZED: Configure audio session and engine for immediate playback
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [])
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
-            print("[DEBUG] Audio session configured")
+            print("[DEBUG] Audio session configured for optimal performance")
         } catch {
             print("[ERROR] Audio session setup failed: \(error)")
         }
         
-        // Get a SAFE output format - use standard 44.1kHz stereo
-        outputFormat = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
-        print("[DEBUG] Using safe output format: 44.1kHz stereo")
+        // Use optimized output format
+        outputFormat = engine.outputNode.outputFormat(forBus: 0)
+        print("[DEBUG] Engine format: \(outputFormat.sampleRate)Hz, channels: \(outputFormat.channelCount)")
         
-        // Initialize a SIMPLE mixer without complex configuration
-        initSimpleMixer()
-        
-        // ULTRA-MINIMAL: Disable scheduler to avoid crashes
+        // Skip scheduler for minimal latency
         self.scheduler = nil
-        callbackToDartInt32(sampleRateCallbackPort, 44100)
-        print("[DEBUG] Scheduler DISABLED for minimal mode")
+        self.mixer = nil
+        
+        // CRITICAL: Start engine immediately to eliminate first-play delay
+        do {
+            engine.prepare()
+            try engine.start()
+            print("[DEBUG] Engine pre-started for zero-latency playback")
+        } catch {
+            print("[ERROR] Failed to pre-start engine: \(error)")
+        }
+        
+        // Send callback immediately to unblock Dart
+        callbackToDartInt32(sampleRateCallbackPort, Int32(outputFormat.sampleRate))
         
         SfizzAU.registerAU()
         print("[DEBUG] CocoaEngine init completed")
@@ -56,12 +64,12 @@ public class CocoaEngine {
     }
     
     func addTrackSf2(sf2Path: String, isAsset: Bool, presetIndex: Int32, completion: @escaping (track_index_t) -> Void) {
-        NSLog("🚨🚨🚨 NUCLEAR CocoaEngine: Adding SF2 track: \(sf2Path) isAsset=\(isAsset) preset=\(presetIndex)")
-        print("[DEBUG] Adding SF2 track: \(sf2Path)")
+        NSLog("🎵 HIGH-PERF: Adding SF2 track: \(sf2Path)")
+        print("[DEBUG] Adding SF2 track with optimized loading: \(sf2Path)")
         
         AudioUnitUtils.loadAudioUnits { [weak self] avAudioUnitComponents in
             guard let self = self else { 
-                completion(track_index_t.max)
+                completion(track_index_t(999))
                 return 
             }
             
@@ -70,84 +78,77 @@ public class CocoaEngine {
             if let appleSamplerComponent = appleSamplerComponent {
                 AudioUnitUtils.instantiate(
                     description: appleSamplerComponent.audioComponentDescription,
-                    sampleRate: 44100,
-                    options: []
+                    sampleRate: Double(self.outputFormat.sampleRate),
+                    options: [.loadOutOfProcess] // Performance optimization
                 ) { [weak self] (avAudioUnit: AVAudioUnit?) in
                     guard let self = self, let avAudioUnit = avAudioUnit else {
-                        completion(track_index_t.max)
+                        completion(track_index_t(999))
                         return
                     }
                     
+                    // PERFORMANCE: Execute on main thread for immediate connection
                     DispatchQueue.main.async {
                         if let normalizedPath = self.normalizePath(sf2Path, isAsset: isAsset) {
                             let url = URL(fileURLWithPath: normalizedPath)
                             
-                            // Simple SF2 loading without complex memory management
-                            NSLog("🎼🎼🎼 NUCLEAR: Loading SF2 file: \(url.path)")
-                            print("[DEBUG] About to call loadSoundFont for: \(url.lastPathComponent)")
-                            let loadSuccess = loadSoundFont(avAudioUnit: avAudioUnit, soundFontURL: url, presetIndex: presetIndex)
-                            print("[DEBUG] loadSoundFont returned: \(loadSuccess)")
-                            if loadSuccess {
-                                let trackIndex = self.nextTrackIndex()
-                                NSLog("✅✅✅ NUCLEAR: SF2 loaded successfully! Track=\(trackIndex) File=\(url.lastPathComponent)")
-                                self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
-                                completion(trackIndex)
-                            } else {
-                                NSLog("❌❌❌ NUCLEAR: SF2 loading FAILED for \(sf2Path)")
-                                print("[DEBUG] SF2 loading failed for \(sf2Path)")
-                                completion(track_index_t.max) // Return max value to indicate failure
-                            }
+                            // High-performance SF2 loading with immediate connection
+                            loadSoundFont(avAudioUnit: avAudioUnit, soundFontURL: url, presetIndex: presetIndex)
+                            let trackIndex = self.nextTrackIndex()
+                            
+                            // CRITICAL: Connect immediately and register AudioUnit
+                            self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
+                            self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
+                            
+                            completion(trackIndex)
                         } else {
-                            NSLog("❌❌❌ NUCLEAR: Path normalization FAILED for \(sf2Path)")
-                            print("[DEBUG] Path normalization failed for \(sf2Path)")
-                            completion(track_index_t.max) // Return max value to indicate failure
+                            print("[ERROR] Path normalization failed for \(sf2Path)")
+                            completion(track_index_t(999))
                         }
                     }
                 }
             } else {
-                print("[DEBUG] Apple Sampler component not found")
-                completion(track_index_t.max) // Return max value to indicate failure
+                print("[ERROR] Apple Sampler component not found")
+                completion(track_index_t(999))
             }
         }
     }
     
     func setTrackAudioUnit(trackIndex: track_index_t, avAudioUnit: AVAudioUnit) {
-        // MINIMAL: Skip scheduler operations
+        // Register with scheduler if available
+        if let scheduler = scheduler {
+            SchedulerSetTrackAudioUnit(scheduler, trackIndex, avAudioUnit.audioUnit)
+            print("[DEBUG] Track \(trackIndex) registered with scheduler")
+        }
         updateAvAudioUnits(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
-        simpleConnect(avAudioUnit: avAudioUnit)
-        print("[DEBUG] AudioUnit connected without scheduler")
+        print("[DEBUG] AudioUnit configured for track \(trackIndex)")
     }
     
     func play() {
-        print("[DEBUG] CocoaEngine.play() called - Clean SF2 system")
-        print("[DEBUG] Current thread: \(Thread.isMainThread ? "main" : "background")")
+        print("[DEBUG] HIGH-PERF play() - Engine running: \(engine.isRunning)")
         print("[DEBUG] Connected AudioUnits: \(self.unsafeAvAudioUnits.count)")
         
         guard Thread.isMainThread else {
-            print("[DEBUG] Dispatching to main thread...")
             DispatchQueue.main.async { self.play() }
             return
         }
         
-        // Check if we have any connected audio units
-        if self.unsafeAvAudioUnits.isEmpty {
-            print("[ERROR] No audio units connected, cannot start engine")
-            return
+        // Start scheduler if available
+        if let scheduler = scheduler {
+            SchedulerPlay(scheduler)
+            print("[DEBUG] Scheduler started")
         }
         
-        do {
-            // IMPROVED: Proper lifecycle management
-            if !self.engine.isRunning {
-                print("[DEBUG] Starting engine with \(self.unsafeAvAudioUnits.count) connected units")
-                
-                // Prepare engine before starting to avoid crashes
-                self.engine.prepare()
-                try self.engine.start()
-                print("[DEBUG] Engine started successfully")
+        // Engine should already be running, but ensure it's ready
+        if !engine.isRunning {
+            do {
+                engine.prepare()
+                try engine.start()
+                print("[DEBUG] Engine started (should have been pre-started)")
+            } catch {
+                print("[ERROR] Failed to start engine: \(error)")
             }
-            
-        } catch {
-            print("[ERROR] Play failed: \(error)")
+        } else {
+            print("[DEBUG] Engine already running - ready for immediate MIDI")
         }
     }
     
@@ -157,6 +158,12 @@ public class CocoaEngine {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { self.pause() }
             return
+        }
+        
+        // Pause scheduler if available
+        if let scheduler = scheduler {
+            SchedulerPause(scheduler)
+            print("[DEBUG] Scheduler paused")
         }
         
         // IMPROVED: Proper engine lifecycle management to prevent freezes
@@ -177,30 +184,55 @@ public class CocoaEngine {
         }
     }
     
-    // MINIMAL mixer initialization - just use the engine's main mixer
-    private func initSimpleMixer() {
-        // Use the engine's built-in main mixer node instead of creating a custom one
-        self.mixer = nil // We'll use the main mixer node directly
-        print("[DEBUG] Using engine main mixer node")
+    // Initialize mixer with callback for async completion
+    private func initMixer(completion: @escaping () -> Void) {
+        let componentDescription = AudioComponentDescription(
+            componentType: kAudioUnitType_Mixer,
+            componentSubType: kAudioUnitSubType_MultiChannelMixer,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+        
+        AVAudioUnit.instantiate(with: componentDescription, options: []) { avAudioUnit, err in
+            if let error = err {
+                print("[ERROR] Failed to create mixer: \(error)")
+                self.mixer = nil
+                completion()
+                return
+            }
+            
+            self.mixer = avAudioUnit
+            
+            if let avAudioUnit = avAudioUnit {
+                let hardwareFormat = self.engine.outputNode.outputFormat(forBus: 0)
+                
+                self.engine.attach(avAudioUnit)
+                self.engine.connect(avAudioUnit, to: self.engine.outputNode, format: hardwareFormat)
+                print("[DEBUG] Mixer created and connected to output")
+                
+                completion()
+            }
+        }
     }
     
-    // MINIMAL connection - connect directly to main mixer
-    private func simpleConnect(avAudioUnit: AVAudioUnit) {
-        // Simple connection to main mixer without bus management
+    // HIGH-PERFORMANCE connection optimized for immediate playback
+    private func performanceConnect(avAudioUnit: AVAudioUnit, trackIndex: track_index_t) {
         do {
+            // Attach to engine
             self.engine.attach(avAudioUnit)
-            self.engine.connect(avAudioUnit, to: self.engine.mainMixerNode, format: self.outputFormat)
-            print("[DEBUG] Simple connection to main mixer completed")
             
-            // Start the engine as soon as we have a connected AudioUnit
-            self.startEngineIfNeeded()
+            // Connect with optimal format
+            let format = avAudioUnit.outputFormat(forBus: 0)
+            self.engine.connect(avAudioUnit, to: self.engine.mainMixerNode, format: format)
             
-            // Test sound immediately after connection
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.testSound(avAudioUnit: avAudioUnit)
-            }
+            // Update tracking
+            updateAvAudioUnits(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
+            
+            print("[DEBUG] HIGH-PERF: Track \(trackIndex) connected and ready")
+            
         } catch {
-            print("[ERROR] Simple connection failed: \(error)")
+            print("[ERROR] Performance connection failed: \(error)")
         }
     }
     
@@ -217,31 +249,6 @@ public class CocoaEngine {
         }
     }
     
-    // Test function to trigger a simple sound
-    private func testSound(avAudioUnit: AVAudioUnit) {
-        print("[DEBUG] Testing sound on connected AudioUnit")
-        
-        // Send a simple note-on MIDI message
-        let noteOnCommand: UInt32 = 0x90 // Note On, channel 0
-        let noteNumber: UInt32 = 60 // Middle C
-        let velocity: UInt32 = 100
-        
-        let result = MusicDeviceMIDIEvent(avAudioUnit.audioUnit, noteOnCommand, noteNumber, velocity, 0)
-        if result == noErr {
-            print("[DEBUG] Note ON sent successfully")
-            
-            // Send note off after 1 second
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                let noteOffCommand: UInt32 = 0x80 // Note Off, channel 0
-                let result2 = MusicDeviceMIDIEvent(avAudioUnit.audioUnit, noteOffCommand, noteNumber, 0, 0)
-                if result2 == noErr {
-                    print("[DEBUG] Note OFF sent successfully")
-                }
-            }
-        } else {
-            print("[ERROR] Failed to send MIDI note: \(result)")
-        }
-    }
     
     private func updateAvAudioUnits(trackIndex: track_index_t, avAudioUnit: AVAudioUnit?) {
         if let avAudioUnit = avAudioUnit {
@@ -272,22 +279,35 @@ public class CocoaEngine {
         }
     }
     
-    // INDUSTRY STANDARD: MIDI event handling for SF2 playback
+    // HIGH-PERFORMANCE: Optimized MIDI event handling for immediate SF2 playback
     func sendMIDIEvent(trackIndex: track_index_t, midiStatus: UInt8, midiData1: UInt8, midiData2: UInt8) {
+        // DIAGNOSTIC: Show all available tracks
+        NSLog("🔍 Available AudioUnit tracks: %@", Array(unsafeAvAudioUnits.keys).description)
+        NSLog("🎵 Looking for track %d to send MIDI status=0x%02X note=%d vel=%d", trackIndex, midiStatus, midiData1, midiData2)
+        
         guard let audioUnit = unsafeAvAudioUnits[trackIndex] else {
-            print("[DEBUG] No AudioUnit found for track \(trackIndex)")
+            NSLog("❌ CRITICAL: No AudioUnit found for track %d - available: %@", trackIndex, Array(unsafeAvAudioUnits.keys).description)
             return
         }
         
+        NSLog("✅ Found AudioUnit for track %d, sending MIDI...", trackIndex)
+        
+        // PERFORMANCE: Direct MIDI with minimal overhead
         let command = UInt32(midiStatus)
-        let data1 = UInt32(midiData1)
+        let data1 = UInt32(midiData1) 
         let data2 = UInt32(midiData2)
         
         let result = MusicDeviceMIDIEvent(audioUnit.audioUnit, command, data1, data2, 0)
+        
         if result == noErr {
-            print("[DEBUG] MIDI sent to track \(trackIndex): status=\(midiStatus) data1=\(midiData1) data2=\(midiData2)")
+            NSLog("🎵 SUCCESS: MIDI sent to track %d: status=0x%02X note=%d vel=%d", trackIndex, midiStatus, midiData1, midiData2)
         } else {
-            print("[DEBUG] MIDI send failed for track \(trackIndex): \(result)")
+            NSLog("❌ MIDI FAILED for track %d: error=%d", trackIndex, Int(result))
+            
+            // Diagnostic: Check if AudioUnit is still valid
+            if !engine.attachedNodes.contains(audioUnit) {
+                NSLog("❌ AudioUnit not attached to engine for track %d", trackIndex)
+            }
         }
     }
     

@@ -32,7 +32,9 @@ add_library(flutter_sequencer SHARED
     # Shared C++ classes from iOS (cross-platform core)
     ${IOS_DIR}/Classes/CallbackManager/CallbackManager.cpp
     ${IOS_DIR}/Classes/Scheduler/BaseScheduler.cpp
-    ${IOS_DIR}/Classes/Scheduler/SchedulerEvent.cpp
+    
+    # Android-specific scheduler implementation
+    ${ANDROID_DIR}/src/main/cpp/Scheduler/SchedulerEvent.cpp
     
     # Minimal Android engine (uses OpenSL ES, no Oboe dependency)
     ${ANDROID_DIR}/src/main/cpp/AndroidEngine/AndroidEngine.cpp
@@ -52,6 +54,8 @@ target_include_directories(flutter_sequencer PRIVATE
     ${IOS_DIR}/Classes/CallbackManager
     ${IOS_DIR}/Classes/Scheduler
     ${IOS_DIR}/Classes/IInstrument
+    ${IOS_DIR}/Classes/Buffer
+    ${ANDROID_DIR}/src/main/cpp/Scheduler
     ${ANDROID_DIR}/src/main/cpp/third_party/TinySoundFont
 )
 

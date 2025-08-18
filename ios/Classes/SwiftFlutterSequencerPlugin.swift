@@ -44,16 +44,16 @@ public class SwiftFlutterSequencerPlugin: NSObject, FlutterPlugin {
                 print("Other audio playing, configuring to mix")
             }
             
-            // Configure for audio playback (not recording) with better compatibility
+            // HIGH-PERFORMANCE: Configure for low-latency audio playback
             try session.setCategory(.playback, 
                                    mode: .default, 
-                                   options: [.mixWithOthers, .allowBluetooth, .allowAirPlay])
+                                   options: [.mixWithOthers, .allowBluetooth, .allowAirPlay, .defaultToSpeaker])
             
             // Set sample rate first (more compatible)
             try session.setPreferredSampleRate(44100)
             
-            // Set buffer duration to match common AudioUnit buffer sizes (512/1024 frames at 44.1kHz)
-            try session.setPreferredIOBufferDuration(0.023) // ~1024 frames at 44.1kHz for AudioUnit compatibility
+            // PERFORMANCE: Optimize buffer duration for immediate response
+            try session.setPreferredIOBufferDuration(0.005) // ~256 frames at 44.1kHz for minimal latency
             
             // Activate the session with retry logic
             var attempts = 0
@@ -178,8 +178,8 @@ func destroyEngine() {
 @_cdecl("add_track_sfz")
 func addTrackSfz(sfzPath: UnsafePointer<CChar>, tuningPath: UnsafePointer<CChar>, callbackPort: Dart_Port) {
     guard let engine = plugin.engine else {
-        print("[DEBUG] Engine not available, returning max track index")
-        callbackToDartInt32(callbackPort, Int32(track_index_t.max))
+        print("[DEBUG] Engine not available, returning error track index")
+        callbackToDartInt32(callbackPort, -1)
         return
     }
     engine.addTrackSfz(sfzPath: sfzPath, tuningPath: tuningPath) { trackIndex in
@@ -190,8 +190,8 @@ func addTrackSfz(sfzPath: UnsafePointer<CChar>, tuningPath: UnsafePointer<CChar>
 @_cdecl("add_track_sfz_string")
 func addTrackSfzString(sampleRoot: UnsafePointer<CChar>, sfzString: UnsafePointer<CChar>, tuningString: UnsafePointer<CChar>, callbackPort: Dart_Port) {
     guard let engine = plugin.engine else {
-        print("[DEBUG] Engine not available, returning max track index")
-        callbackToDartInt32(callbackPort, Int32(track_index_t.max))
+        print("[DEBUG] Engine not available, returning error track index")
+        callbackToDartInt32(callbackPort, -1)
         return
     }
     engine.addTrackSfzString(sampleRoot: sampleRoot, sfzString: sfzString, tuningString: tuningString) { trackIndex in
@@ -206,8 +206,8 @@ func addTrackSf2(path: UnsafePointer<CChar>, isAsset: Bool, presetIndex: Int32, 
     
     guard let engine = plugin.engine else {
         NSLog("❌❌❌ NUCLEAR FFI: Engine not available!")
-        print("[DEBUG] Engine not available, returning max track index")
-        callbackToDartInt32(callbackPort, Int32(track_index_t.max))
+        print("[DEBUG] Engine not available, returning error track index")
+        callbackToDartInt32(callbackPort, -1)
         return
     }
     
@@ -221,8 +221,8 @@ func addTrackSf2(path: UnsafePointer<CChar>, isAsset: Bool, presetIndex: Int32, 
 // Called from method channel
 func addTrackAudioUnit(_ audioUnitId: String, completion: @escaping (track_index_t) -> Void) {
     guard let engine = plugin.engine else {
-        print("[DEBUG] Engine not available, returning max track index")
-        completion(track_index_t.max)
+        print("[DEBUG] Engine not available, returning error track index")
+        completion(track_index_t(999))
         return
     }
     engine.addTrackAudioUnit(audioUnitId: audioUnitId, completion: completion)
@@ -292,41 +292,49 @@ func getBufferAvailableCount(trackIndex: track_index_t) -> UInt32 {
 
 @_cdecl("handle_events_now")
 func handleEventsNow(trackIndex: track_index_t, eventData: UnsafePointer<UInt8>, eventsCount: UInt32) {
+    // CRITICAL: This should appear in system logs if function is called
+    NSLog("🚨🚨🚨 FUNCTION ENTRY: handleEventsNow track=%d count=%d", trackIndex, eventsCount)
+    print("🚀 NATIVE FFI: handleEventsNow track=\(trackIndex) count=\(eventsCount)")
+    
     guard let engine = plugin.engine else {
-        print("[DEBUG] Engine not available, skipping event handling")
+        NSLog("❌❌❌ ENGINE NOT AVAILABLE")
         return
     }
     
-    // INDUSTRY STANDARD: Direct MIDI event processing for immediate playback
-    NSLog("🎼🎼🎼 NUCLEAR FFI: handleEventsNow track=\(trackIndex) count=\(eventsCount)")
-    print("[DEBUG] FFI handleEventsNow: track=\(trackIndex) events=\(eventsCount)")
+    NSLog("✅✅✅ Engine available, processing events...")
     
-    if engine.scheduler != nil {
-        // Use scheduler if available
-        let events = UnsafeMutablePointer<SchedulerEvent>.allocate(capacity: Int(eventsCount))
-        rawEventDataToEvents(eventData, eventsCount, events)
-        SchedulerHandleEventsNow(engine.scheduler, trackIndex, UnsafePointer(events), eventsCount)
-        events.deallocate()
-    } else {
-        // MINIMAL MODE: Direct MIDI processing without scheduler
-        print("[DEBUG] Using direct MIDI processing (scheduler-free mode)")
+    // FIXED: Direct MIDI processing with detailed diagnostics
+    NSLog("🎵 Processing %d events for track %d", eventsCount, trackIndex)
+    
+    // Parse and send MIDI events directly
+    for i in 0..<Int(eventsCount) {
+        let offset = i * 16 // 16 bytes per SchedulerEvent
         
-        // Parse and send MIDI events directly
-        for i in 0..<Int(eventsCount) {
-            let offset = i * 24 // Size of SchedulerEvent
-            let eventType = eventData.advanced(by: offset).pointee
+        // Read the event type (4 bytes at offset 4)
+        let eventType = eventData.advanced(by: offset + 4).withMemoryRebound(to: UInt32.self, capacity: 1) { ptr in
+            return ptr.pointee
+        }
+        
+        NSLog("🔍 Event %d: type=%d", i, eventType)
+        
+        if eventType == 0 { // MIDI_EVENT
+            // MIDI data is in the data[8] array starting at offset 8
+            let midiStatus = eventData.advanced(by: offset + 8).pointee   // data[0]
+            let midiData1 = eventData.advanced(by: offset + 9).pointee    // data[1]  
+            let midiData2 = eventData.advanced(by: offset + 10).pointee   // data[2]
             
-            if eventType == 0 { // MIDI event
-                // Extract MIDI data from raw event
-                let midiStatus = eventData.advanced(by: offset + 16).pointee
-                let midiData1 = eventData.advanced(by: offset + 17).pointee  
-                let midiData2 = eventData.advanced(by: offset + 18).pointee
-                
-                NSLog("🎵🎵🎵 NUCLEAR: Direct MIDI track=\(trackIndex) status=\(midiStatus) data1=\(midiData1) data2=\(midiData2)")
-                
-                // Send directly to CocoaEngine
-                engine.sendMIDIEvent(trackIndex: trackIndex, midiStatus: midiStatus, midiData1: midiData1, midiData2: midiData2)
+            NSLog("🎵 MIDI Event: track=%d status=0x%02X note=%d vel=%d", trackIndex, midiStatus, midiData1, midiData2)
+            
+            // Send directly to CocoaEngine
+            engine.sendMIDIEvent(trackIndex: trackIndex, midiStatus: midiStatus, midiData1: midiData1, midiData2: midiData2)
+        } else if eventType == 1 { // VOLUME_EVENT
+            // Volume is stored as a float in the data array
+            let volume = eventData.advanced(by: offset + 8).withMemoryRebound(to: Float.self, capacity: 1) { ptr in
+                return ptr.pointee
             }
+            NSLog("🔊 Volume Event: track=%d volume=%f", trackIndex, volume)
+        } else {
+            NSLog("⚠️ Unknown event type: %d", eventType)
         }
     }
 }

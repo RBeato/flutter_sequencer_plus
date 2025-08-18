@@ -150,10 +150,13 @@ __attribute__((visibility("default"))) __attribute__((used))
     __attribute__((visibility("default"))) __attribute__((used))
     float get_track_volume(track_index_t trackIndex) {
         if (!check_engine()) {
-            return 0.0f;
+            LOGI("Plugin: get_track_volume called without engine - returning default 1.0");
+            return 1.0f; // Match iOS behavior - return sensible default instead of 0.0
         }
 
-        return engine->mSchedulerMixer.getLevel(trackIndex);
+        float level = engine->mSchedulerMixer.getLevel(trackIndex);
+        LOGI("Plugin: get_track_volume track=%d level=%.3f", trackIndex, level);
+        return level;
     }
 
     __attribute__((visibility("default"))) __attribute__((used))
@@ -185,12 +188,50 @@ __attribute__((visibility("default"))) __attribute__((used))
     __attribute__((visibility("default"))) __attribute__((used))
     void handle_events_now(track_index_t trackIndex, const uint8_t* eventData, int32_t eventsCount) {
         if (!check_engine()) {
+            LOGE("Plugin: handle_events_now called without engine");
             return;
         }
 
         SchedulerEvent events[eventsCount];
-
         rawEventDataToEvents(eventData, eventsCount, events);
+
+        // Smart logging - only log meaningful MIDI events
+        int midiNoteOnCount = 0;
+        int midiNoteOffCount = 0;
+        int volumeEventCount = 0;
+        
+        for (int32_t i = 0; i < eventsCount; i++) {
+            if (events[i].type == 0) { // MIDI_EVENT
+                uint8_t midiStatus = events[i].data[0];
+                uint8_t statusCode = midiStatus >> 4;
+                if (statusCode == 0x9) midiNoteOnCount++;
+                else if (statusCode == 0x8) midiNoteOffCount++;
+            } else if (events[i].type == 1) { // VOLUME_EVENT
+                volumeEventCount++;
+            }
+        }
+        
+        // Only log meaningful MIDI events, reduce volume spam
+        if (midiNoteOnCount > 0) {
+            LOGI("🎵 Track %d: %d events (NoteOn:%d, NoteOff:%d, Volume:%d)", 
+                 trackIndex, eventsCount, midiNoteOnCount, midiNoteOffCount, volumeEventCount);
+            
+            // Log first MIDI event only for debugging
+            for (int32_t i = 0; i < eventsCount && i < 1; i++) {
+                if (events[i].type == 0 && events[i].data[0] != 0) { // Only log valid MIDI
+                    uint8_t midiStatus = events[i].data[0];
+                    uint8_t midiData1 = events[i].data[1];
+                    uint8_t midiData2 = events[i].data[2];
+                    LOGI("  MIDI[%d]: status=0x%02X note=%d vel=%d", i, midiStatus, midiData1, midiData2);
+                }
+            }
+        } else if (eventsCount > 50) {
+            // Only log large batches of volume events occasionally
+            static int volumeLogCount = 0;
+            if (++volumeLogCount % 10 == 0) {
+                LOGI("🔇 Track %d: Large batch %d events (mostly volume)", trackIndex, eventsCount);
+            }
+        }
 
         engine->mSchedulerMixer.handleEventsNow(trackIndex, events, eventsCount);
     }

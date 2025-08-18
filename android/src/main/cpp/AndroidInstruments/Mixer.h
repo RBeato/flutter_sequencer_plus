@@ -13,7 +13,7 @@
 #include "../Utils/OptionArray.h"
 #include "../Utils/Logging.h"
 
-constexpr int32_t kBufferSize = 128*4;  // Optimized buffer size for performance
+constexpr int32_t kBufferSize = 128*2;  // Match AndroidEngine buffer size (128 frames * 2 channels)
 constexpr uint8_t kMaxTracks = 64;  // Reasonable limit for mobile performance
 
 /**
@@ -100,12 +100,16 @@ public:
             auto track = getTrack(trackIndex);
 
             if (track.has_value()) {
-                // if (midiEvent.midiStatus == 144) {
-                //     LOGI("Track %i: note on %i", trackIndex, midiEvent.midiData1);
-                // } else if (midiEvent.midiStatus == 128) {
-                //     LOGI("Track %i: note off %i", trackIndex, midiEvent.midiData1);
-                // }
+                // Reduce logging frequency during playback
+                uint8_t statusCode = midiEvent.midiStatus >> 4;
+                static int noteOnLogCount = 0;
+                if (statusCode == 0x9 && ++noteOnLogCount % 8 == 0) { // Only log every 8th note
+                    LOGI("→ Mixer routing NOTE ON to track %d: note=%d vel=%d", 
+                         trackIndex, midiEvent.midiData1, midiEvent.midiData2);
+                }
                 track.value()->handleMidiEvent(midiEvent.midiStatus, midiEvent.midiData1, midiEvent.midiData2);
+            } else {
+                LOGE("❌ MIXER ERROR: Track %d doesn't exist!", trackIndex);
             }
         }
     }
@@ -154,6 +158,10 @@ public:
             TrackInfo nextTrackInfo = maybeTrackInfo.value();
             nextTrackInfo.level = level;
             mTrackMap.insert_or_assign(trackIndex, nextTrackInfo);
+            
+            LOGI("Mixer: Set track %d level to %.3f", trackIndex, level);
+        } else {
+            LOGE("Mixer: Failed to set level for track %d - track not found", trackIndex);
         }
     }
 
@@ -164,7 +172,8 @@ public:
             TrackInfo nextTrackInfo = maybeTrackInfo.value();
             return nextTrackInfo.level;
         } else {
-            return 0.0;
+            LOGE("Mixer: getLevel called for non-existent track %d - returning default 1.0", trackIndex);
+            return 1.0f; // Return sensible default instead of 0.0
         }
     }
 

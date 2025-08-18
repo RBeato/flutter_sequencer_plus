@@ -289,9 +289,12 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         position = sequence.getBeat();
         isPlaying = sequence.getIsPlaying();
 
-        tracks.forEach((track) {
-          trackVolumes[track.id] = track.getVolume();
-        });
+        // DON'T override trackVolumes - they should only be set by user interaction
+        // The ticker was resetting volumes to what the native track reports, 
+        // which can be 0 on Android after stopping playback
+        // tracks.forEach((track) {
+        //   trackVolumes[track.id] = track.getVolume();
+        // });
       });
     });
     ticker.start();
@@ -302,6 +305,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     if (isPlaying) {
       print('[DEBUG] Pausing sequence...');
       _pausePlayback();
+      sequence.pause();
     } else {
       print('[DEBUG] Starting/resuming playback...');
       print('[DEBUG] Available tracks: ${tracks.length}');
@@ -355,6 +359,9 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     // Save current position for resume
     _pausedAtBeat = position;
     
+    // Pause the native engine
+    NativeBridge.pause();
+    
     setState(() {
       isPlaying = false;
       isPaused = true;
@@ -390,11 +397,14 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     _playbackTimer = null;
     _playbackStartTime = null;
     
-    // Send note-off commands to all tracks to stop sustained sounds
+    // Send optimized note-off commands to only active tracks
+    int totalNotesOff = 0;
     for (final track in tracks) {
+      // Only send note-off for commonly used drum/instrument notes instead of all 128
       final noteOffEvents = <MidiEvent>[];
-      // Send note-off for all possible MIDI notes (0-127)
-      for (int noteNumber = 0; noteNumber <= 127; noteNumber++) {
+      
+      // Common drum notes (36-81) and typical instrument range
+      for (int noteNumber = 36; noteNumber <= 81; noteNumber++) {
         noteOffEvents.add(MidiEvent.ofNoteOff(beat: 0.0, noteNumber: noteNumber));
       }
       
@@ -405,9 +415,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
           GlobalState().sampleRate!, 
           tempo
         );
+        totalNotesOff += noteOffEvents.length;
       }
     }
-    print('[DEBUG] Sent all notes off to stop sustained sounds');
+    print('[DEBUG] Sent $totalNotesOff note-offs to stop sustained sounds');
     
     // DON'T stop the engine - keep SF2s loaded!
     print('[DEBUG] Keeping audio engine running to preserve SF2 loading');
@@ -441,15 +452,24 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         _processedEvents.clear();
       } else {
         print('[DEBUG] Stopping playback (loop is OFF)...');
-        // Stop playback
+        // Stop playback and reset everything to beginning
         _stopSimplePlayback();
+        
+        // Clear all timing state to ensure clean restart
+        _processedEvents.clear();
+        _playbackStartTime = null;
+        _playbackStartBeat = 0.0;
+        _pausedAtBeat = 0.0;
+        
         setState(() {
           isPlaying = false;
           position = 0.0;
+          isPaused = false;
         });
+        
         // Sync all tracks to pick up changes made during playback
         tracks.forEach(syncTrack);
-        print('[DEBUG] UI state updated: isPlaying=false, position=0.0, tracks synced');
+        print('[DEBUG] Single playback ended: isPlaying=false, position=0.0, all timing cleared');
         return;
       }
     }
@@ -464,6 +484,12 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     for (final track in tracks) {
       for (final event in track.events) {
         if (event is MidiEvent) {
+          // CRITICAL FIX: Skip Program Change events during playback to prevent SF2 reload spam
+          // Program Change commands (0xC0-0xCF) cause Apple AudioUnit to reload SF2 banks
+          if ((event.midiStatus & 0xF0) == 0xC0) {
+            continue; // Skip Program Change - SF2 preset is already loaded
+          }
+          
           // Check if this event should trigger now (within a small window)
           final eventBeat = event.beat;
           final eventKey = '${track.id}-${eventBeat}-${event.midiData1}-${event.midiData2}';
@@ -474,7 +500,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
             if (!_processedEvents.contains(eventKey)) {
               // Calculate step number for display (0-based)
               final stepNumber = eventBeat.floor();
-              print('[DEBUG] ♪ Playing: track=${track.id} step=${stepNumber} beat=${eventBeat} note=${event.midiData1} vel=${event.midiData2}');
+              // Reduced logging: only log occasionally or for important events
+              if (stepNumber % 4 == 0) { // Only log on beat 1 of each measure
+                print('[DEBUG] ♪ Playing: track=${track.id} step=${stepNumber} beat=${eventBeat} note=${event.midiData1} vel=${event.midiData2}');
+              }
               
               // Send MIDI event directly
               NativeBridge.handleEventsNow(
@@ -486,7 +515,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
               
               _processedEvents.add(eventKey);
             } else {
-              print('[DEBUG] ⏭️ Skipping duplicate: track=${track.id} beat=${eventBeat} note=${event.midiData1}');
+              // Suppress duplicate skipping logs - too verbose
             }
           }
         }
@@ -504,8 +533,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       return false;
     });
     
-    // Log cleanup if events were removed
-    if (_processedEvents.length != oldSize) {
+    // Reduce cleanup logging - only log significant cleanups
+    if (_processedEvents.length != oldSize && (oldSize - _processedEvents.length) > 5) {
       print('[DEBUG] 🧹 Cleaned ${oldSize - _processedEvents.length} old events, ${_processedEvents.length} remaining');
     }
   }
@@ -598,6 +627,11 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     print('[DEBUG] Volume change: trackId=${selectedTrack?.id} newVolume=$nextVolume');
     if (selectedTrack != null) {
       selectedTrack!.changeVolumeNow(volume: nextVolume);
+      // Update our UI state immediately (don't wait for ticker)
+      setState(() {
+        trackVolumes[selectedTrack!.id] = nextVolume;
+      });
+      print('[DEBUG] Volume UI state updated to $nextVolume for track ${selectedTrack!.id}');
     }
   }
 
@@ -614,20 +648,43 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     print('[DEBUG] Track synced for real-time editing');
   }
 
+  /// Calculate note duration based on tempo
+  /// Faster tempos = shorter sustain for musical feel
+  double _calculateNoteDuration(double tempo) {
+    // Base duration: 1 beat at 120 BPM
+    const double baseTempo = 120.0;
+    const double baseDuration = 1.6; // Double the previous duration (was 0.8)
+    
+    // Scale duration inversely with tempo
+    // Faster tempo = shorter notes for tighter feel
+    double tempoDuration = (baseTempo / tempo) * baseDuration;
+    
+    // Clamp to reasonable range: 0.2 to 1.8 beats (doubled from 0.1-0.9)
+    return tempoDuration.clamp(0.2, 1.8);
+  }
+
   syncTrack(track) {
-    print('[DEBUG] Syncing track: id=${track.id}');
+    // Reduced logging for performance
     track.clearEvents();
+    int noteCount = 0;
+    final currentTempo = sequence.getTempo();
+    final noteDuration = _calculateNoteDuration(currentTempo);
+    
     trackStepSequencerStates[track.id]!
         .iterateEvents((step, noteNumber, velocity) {
-      if (step < stepCount) {
-        print('  [DEBUG] Adding note: step=$step noteNumber=$noteNumber velocity=$velocity');
+      if (step < stepCount && velocity > 0) {
+        noteCount++;
         track.addNote(
             noteNumber: noteNumber,
             velocity: velocity,
             startBeat: step.toDouble(),
-            durationBeats: 1.0);
+            durationBeats: noteDuration);
       }
     });
+    // Only log when there are actual notes to sync
+    if (noteCount > 0) {
+      print('[DEBUG] Synced track ${track.id}: $noteCount notes (duration: ${noteDuration.toStringAsFixed(2)} beats @ ${currentTempo.toStringAsFixed(0)} BPM)');
+    }
     track.syncBuffer();
   }
 
@@ -713,6 +770,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         newTracks.forEach((track) {
           trackStepSequencerStates[track.id] = StepSequencerState();
           trackVolumes[track.id] = 0.7; // Set default volume
+          
+          // IMPORTANT: Actually set the volume on the native track object
+          track.changeVolumeNow(volume: 0.7);
+          print('[DEBUG] Set initial volume 0.7 for track ${track.id} (${track.instrument.displayName})');
         });
       });
       
@@ -722,6 +783,35 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       }
     } catch (e) {
       print('[ERROR] Failed to initialize tracks: $e');
+      // Show error dialog to user
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: Text('Track Loading Failed'),
+              content: Text('Failed to load tracks with GM preset $_selectedGMPreset. Some presets might not be available in the soundfont. Please try a different preset.'),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    // Reset to default preset
+                    setState(() {
+                      _selectedGMPreset = 0;
+                    });
+                    _reinitializeTracks();
+                  },
+                  child: Text('Reset to Default'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+      }
       // Ensure UI updates even on error
       setState(() {
         tracks = [];
@@ -750,7 +840,81 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   
   Future<void> _reinitializeTracks() async {
     print('[DEBUG] Reinitializing tracks with GM preset $_selectedGMPreset');
+    
+    // Store current playback state to preserve timing
+    final wasPlaying = isPlaying;
+    final wasPaused = isPaused;
+    final currentPosition = position;
+    final currentPlaybackStartTime = _playbackStartTime;
+    final currentPlaybackStartBeat = _playbackStartBeat;
+    final currentPausedAtBeat = _pausedAtBeat;
+    final currentProcessedEvents = Set<String>.from(_processedEvents);
+    
+    print('[DEBUG] Storing playback state: playing=$wasPlaying paused=$wasPaused position=$currentPosition');
+    
+    // Store current track states and volumes
+    final currentStates = <int, StepSequencerState>{};
+    final currentVolumes = <int, double>{};
+    for (final track in tracks) {
+      if (trackStepSequencerStates.containsKey(track.id)) {
+        currentStates[track.id] = trackStepSequencerStates[track.id]!;
+      }
+      if (trackVolumes.containsKey(track.id)) {
+        currentVolumes[track.id] = trackVolumes[track.id]!;
+      }
+    }
+    
+    // Recreate tracks with new GM preset
     await _initializeTracks();
+    
+    // Restore track states and volumes for tracks that still exist
+    for (final track in tracks) {
+      if (currentStates.containsKey(track.id)) {
+        trackStepSequencerStates[track.id] = currentStates[track.id]!;
+        syncTrack(track);
+      }
+      if (currentVolumes.containsKey(track.id)) {
+        trackVolumes[track.id] = currentVolumes[track.id]!;
+        track.changeVolumeNow(volume: currentVolumes[track.id]!);
+        print('[DEBUG] Restored volume ${currentVolumes[track.id]} for track ${track.id}');
+      }
+    }
+    
+    // Restore playback state if we were playing
+    if (wasPlaying && !wasPaused) {
+      print('[DEBUG] Restoring active playback state...');
+      _playbackStartTime = currentPlaybackStartTime;
+      _playbackStartBeat = currentPlaybackStartBeat;
+      _processedEvents = currentProcessedEvents;
+      
+      setState(() {
+        isPlaying = true;
+        isPaused = false;
+        position = currentPosition;
+      });
+      
+      // Restart playback timer
+      _playbackTimer = Timer.periodic(Duration(milliseconds: 10), (timer) {
+        _processPlayback();
+      });
+      
+      // Ensure engine is running
+      NativeBridge.play();
+      print('[DEBUG] Playback state restored and timer restarted');
+    } else if (wasPaused) {
+      print('[DEBUG] Restoring paused state...');
+      _pausedAtBeat = currentPausedAtBeat;
+      setState(() {
+        isPlaying = false;
+        isPaused = true;
+        position = currentPosition;
+      });
+      print('[DEBUG] Paused state restored');
+    } else {
+      print('[DEBUG] Playback was stopped - maintaining stopped state');
+    }
+    
+    print('[DEBUG] Tracks reinitialized and all states restored');
   }
 
   Widget _getMainView() {
@@ -862,55 +1026,11 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
             child: Text('Load Demo'),
             onPressed: handleLoadDemo,
           ),
-          MaterialButton(
-            child: Text('🧪 Test SF2'),
-            onPressed: () async {
-              print('[DEBUG] Testing SF2 vs Default Sound...');
-              if (tracks.isNotEmpty) {
-                print('[DEBUG] Playing test notes on all tracks to compare sounds:');
-                
-                // Test different notes on different tracks to hear the difference
-                for (int i = 0; i < tracks.length && i < 3; i++) {
-                  final track = tracks[i];
-                  final noteNumber = 36 + (i * 2); // Different notes for each track
-                  
-                  print('[DEBUG] Testing track ${track.id} with note $noteNumber');
-                  
-                  // Play note
-                  final testEvents = [
-                    MidiEvent.ofNoteOn(beat: 0.0, noteNumber: noteNumber, velocity: 100),
-                  ];
-                  NativeBridge.handleEventsNow(
-                    track.id, 
-                    testEvents, 
-                    GlobalState().sampleRate!, 
-                    sequence.getTempo()
-                  );
-                  
-                  // Wait between notes
-                  await Future.delayed(Duration(milliseconds: 800));
-                  
-                  // Note off
-                  final noteOffEvents = [
-                    MidiEvent.ofNoteOff(beat: 0.0, noteNumber: noteNumber),
-                  ];
-                  NativeBridge.handleEventsNow(
-                    track.id, 
-                    noteOffEvents, 
-                    GlobalState().sampleRate!, 
-                    sequence.getTempo()
-                  );
-                  
-                  await Future.delayed(Duration(milliseconds: 200));
-                }
-              }
-            },
-          ),
         ]),
         DrumMachineWidget(
           track: selectedTrack!,
           stepCount: stepCount,
-          currentStep: isPlaying ? position.floor() : -1, // Show current step when playing
+          currentStep: (isPlaying || isPaused) ? position.floor() : -1, // Show current step when playing or paused
           rowLabels: isDrumTrackSelected ? ROW_LABELS_DRUMS : ROW_LABELS_PIANO,
           columnPitches:
               isDrumTrackSelected ? ROW_PITCHES_DRUMS : ROW_PITCHES_PIANO,

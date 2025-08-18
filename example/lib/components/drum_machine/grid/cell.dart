@@ -34,7 +34,6 @@ class Cell extends StatelessWidget {
     final borderWidth = isCurrentStep ? 2.0 : 1.0;
     
     final box = Container(
-      width: size,
       height: size,
       decoration: BoxDecoration(
         color: Color.lerp(Colors.black, highlightColor, velocity > 0 ? velocity : (isCurrentStep ? 0.3 : 0)),
@@ -52,7 +51,6 @@ class Cell extends StatelessWidget {
           transform:
               Matrix4.translationValues(0, (-1 * size * velocity) + 2, 0),
           child: Container(
-              width: size,
               decoration: BoxDecoration(
                   border: Border(bottom: BorderSide(
                     color: isCurrentStep ? Colors.cyan : Colors.white,
