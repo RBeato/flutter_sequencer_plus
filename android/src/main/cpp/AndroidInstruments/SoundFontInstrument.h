@@ -111,37 +111,55 @@ public:
             return;
         }
         
-        // TinySoundFont requires 4 parameters: f, buffer, samples, flag_mixing
-        // Use 0 for replace mode - the Mixer handles combining tracks
-        tsf_render_float(mTsf, audioData, numFrames, 0);
+        // CRITICAL DEBUG: Check TinySoundFont state before rendering
+        int activeVoices = tsf_active_voice_count(mTsf);
+        static int renderCounter = 0;
+        bool shouldLog = (++renderCounter % 500 == 0) || (activeVoices > 0 && renderCounter % 50 == 0);
         
-        // Check for audio activity (debugging)
+        if (shouldLog) {
+            LOGI("🔍 PRE-RENDER: voices=%d frames=%d stereo=%s tsf=%p", 
+                 activeVoices, numFrames, mIsStereo ? "YES" : "NO", mTsf);
+        }
+        
+        // Clear buffer first to ensure clean state
         const int32_t totalSamples = numFrames * (mIsStereo ? 2 : 1);
+        memset(audioData, 0, totalSamples * sizeof(float));
+        
+        // TinySoundFont render with explicit parameters
+        // TSF_MONO=1, TSF_STEREO_INTERLEAVED=2, TSF_STEREO_UNWEAVED=3
+        tsf_render_float(mTsf, audioData, numFrames, 0); // 0 = replace mode (TSF_FALSE)
+        
+        // Measure actual audio output
         float maxSample = 0.0f;
+        float totalEnergy = 0.0f;
         for (int32_t i = 0; i < totalSamples; ++i) {
-            maxSample = std::max(maxSample, std::abs(audioData[i]));
+            float sample = std::abs(audioData[i]);
+            maxSample = std::max(maxSample, sample);
+            totalEnergy += sample * sample;
+        }
+        float rms = std::sqrt(totalEnergy / totalSamples);
+        
+        // Enhanced diagnostic logging
+        if (shouldLog) {
+            if (maxSample > 0.000001f) {
+                LOGI("🎧 TSF AUDIO: voices=%d max=%.6f rms=%.6f", activeVoices, maxSample, rms);
+            } else if (activeVoices > 0) {
+                LOGE("🔇 TSF SILENT: %d voices active but no audio! Check SF2 preset/bank config", activeVoices);
+                
+                // Additional diagnostics when silent despite active voices
+                LOGI("🔧 TSF CONFIG: stereo=%s sampleRate=%d ch0_volume=%.2f", 
+                     mIsStereo ? "YES" : "NO", mSampleRate, tsf_channel_get_volume(mTsf, 0));
+            }
         }
         
-        // Log audio activity much less frequently
-        static int frameCounter = 0;
-        if (++frameCounter % 1000 == 0 && maxSample > 0.001f) {
-            LOGI("TSF: Audio rendered - max sample level: %.4f", maxSample);
-        }
-        
-        // Apply soft limiting to prevent clipping distortion but boost quiet signals
-        constexpr float maxLevel = 0.95f;  // Leave headroom
-        constexpr float minAudibleLevel = 0.001f;
-        
+        // Apply gentle limiting (no boost - that was masking the real issue)
+        constexpr float maxLevel = 0.95f;
         for (int32_t i = 0; i < totalSamples; ++i) {
             float sample = audioData[i];
-            
-            // Simple soft clipper
             if (sample > maxLevel) {
                 audioData[i] = maxLevel;
             } else if (sample < -maxLevel) {
                 audioData[i] = -maxLevel;
-            } else {
-                audioData[i] = sample;
             }
         }
     }
@@ -153,12 +171,21 @@ public:
         if (statusCode == 0x9) {
             // Note On - CRITICAL PATH
             if (mTsf != nullptr) {
-                // Ensure velocity is properly scaled
+                // Ensure velocity is properly scaled and not zero (which would be note off)
                 float velocity = (data2 > 0) ? (data2 / 127.0f) : 0.0f;
                 
-                // Reduce logging frequency for better performance
+                // CRITICAL: If velocity is 0, treat as note off (MIDI standard)
+                if (data2 == 0) {
+                    LOGI("🎵 SF2 NOTE OFF (vel=0): ch=%d note=%d", channel, data1);
+                    tsf_note_off(mTsf, channel, data1);
+                    return;
+                }
+                
+                // Enhanced logging for debugging
                 static int sf2LogCount = 0;
-                if (++sf2LogCount % 4 == 0) { // Only log every 4th note
+                bool shouldLogNote = (++sf2LogCount % 2 == 0); // Log every 2nd note
+                
+                if (shouldLogNote) {
                     LOGI("🎹 SF2 NOTE ON: ch=%d note=%d vel=%.2f preset=%d", 
                          channel, data1, velocity, this->presetIndex);
                 }
@@ -166,15 +193,20 @@ public:
                 // Use the actual MIDI channel from the event
                 tsf_note_on(mTsf, channel, data1, velocity);
                 
-                // Check if note is playing (less frequent logging)
+                // Check if note is playing and diagnose failures
                 int activeVoices = tsf_active_voice_count(mTsf);
                 if (activeVoices > 0) {
-                    if (sf2LogCount % 4 == 0) { // Only log every 4th note
+                    if (shouldLogNote) {
                         LOGI("✅ SF2: %d voices now active", activeVoices);
                     }
                 } else {
-                    LOGE("❌ SF2 ERROR: Note ON failed - no active voices! Check preset %d on channel %d", 
-                         this->presetIndex, channel);
+                    // This is a critical failure - note should be playing
+                    LOGE("❌ SF2 ERROR: Note ON failed - no active voices! ch=%d note=%d vel=%.2f preset=%d", 
+                         channel, data1, velocity, this->presetIndex);
+                    
+                    // Try to diagnose the issue
+                    LOGI("🔧 DIAGNOSTIC: SF2 has %d presets, using preset index %d", 
+                         tsf_get_presetcount(mTsf), this->presetIndex);
                 }
             } else {
                 LOGE("❌ SF2 ERROR: mTsf is null!");
@@ -182,17 +214,23 @@ public:
         } else if (statusCode == 0x8) {
             // Note Off
             if (mTsf != nullptr) {
-                tsf_note_off(mTsf, channel, data1); // Use actual channel
+                LOGI("🎵 SF2 NOTE OFF: ch=%d note=%d", channel, data1);
+                tsf_note_off(mTsf, channel, data1);
+                
+                int remainingVoices = tsf_active_voice_count(mTsf);
+                LOGI("✅ SF2: %d voices remaining after note off", remainingVoices);
             }
         } else if (statusCode == 0xB) {
             // CC
             if (mTsf != nullptr) {
+                LOGI("🎛️ SF2 CC: ch=%d controller=%d value=%d", channel, data1, data2);
                 tsf_channel_midi_control(mTsf, channel, data1, data2);
             }
         } else if (statusCode == 0xE) {
             // Pitch bend
             auto pitch = (data2 << 7) | data1;
             if (mTsf != nullptr) {
+                LOGI("🎚️ SF2 PITCH: ch=%d pitch=%d", channel, pitch);
                 tsf_channel_set_pitchwheel(mTsf, channel, pitch);
             }
         }

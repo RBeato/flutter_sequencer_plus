@@ -1,4 +1,5 @@
 #include <thread>
+#include <vector>
 #include "AndroidEngine/AndroidEngine.h"
 #include "AndroidInstruments/SoundFontInstrument.h"
 #include "Utils/OptionArray.h"
@@ -192,8 +193,8 @@ __attribute__((visibility("default"))) __attribute__((used))
             return;
         }
 
-        SchedulerEvent events[eventsCount];
-        rawEventDataToEvents(eventData, eventsCount, events);
+        std::vector<SchedulerEvent> events(eventsCount);
+        rawEventDataToEvents(eventData, eventsCount, events.data());
 
         // Smart logging - only log meaningful MIDI events
         int midiNoteOnCount = 0;
@@ -233,7 +234,7 @@ __attribute__((visibility("default"))) __attribute__((used))
             }
         }
 
-        engine->mSchedulerMixer.handleEventsNow(trackIndex, events, eventsCount);
+        engine->mSchedulerMixer.handleEventsNow(trackIndex, events.data(), eventsCount);
     }
 
     __attribute__((visibility("default"))) __attribute__((used))
@@ -242,11 +243,11 @@ __attribute__((visibility("default"))) __attribute__((used))
             return -1;
         }
 
-        SchedulerEvent events[eventsCount];
+        std::vector<SchedulerEvent> events(eventsCount);
 
-        rawEventDataToEvents(eventData, eventsCount, events);
+        rawEventDataToEvents(eventData, eventsCount, events.data());
 
-        return engine->mSchedulerMixer.scheduleEvents(trackIndex, events, eventsCount);
+        return engine->mSchedulerMixer.scheduleEvents(trackIndex, events.data(), eventsCount);
     }
 
     __attribute__((visibility("default"))) __attribute__((used))
