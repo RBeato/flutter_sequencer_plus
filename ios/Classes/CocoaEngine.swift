@@ -65,49 +65,77 @@ public class CocoaEngine {
     
     func addTrackSf2(sf2Path: String, isAsset: Bool, presetIndex: Int32, completion: @escaping (track_index_t) -> Void) {
         NSLog("🎵 HIGH-PERF: Adding SF2 track: \(sf2Path)")
-        print("[DEBUG] Adding SF2 track with optimized loading: \(sf2Path)")
+        print("🎵 DIAGNOSTIC: Starting addTrackSf2 for: \(sf2Path)")
         
         AudioUnitUtils.loadAudioUnits { [weak self] avAudioUnitComponents in
             guard let self = self else { 
+                print("❌ DIAGNOSTIC: Self is nil in loadAudioUnits callback")
                 completion(track_index_t(999))
                 return 
             }
             
+            print("🔍 DIAGNOSTIC: Loaded \(avAudioUnitComponents.count) AudioUnit components")
+            
             let appleSamplerComponent = avAudioUnitComponents.first(where: isAppleSampler)
             
             if let appleSamplerComponent = appleSamplerComponent {
+                print("✅ DIAGNOSTIC: Found Apple Sampler component: \(appleSamplerComponent.name)")
+                
                 AudioUnitUtils.instantiate(
                     description: appleSamplerComponent.audioComponentDescription,
                     sampleRate: Double(self.outputFormat.sampleRate),
                     options: [.loadOutOfProcess] // Performance optimization
                 ) { [weak self] (avAudioUnit: AVAudioUnit?) in
-                    guard let self = self, let avAudioUnit = avAudioUnit else {
+                    print("🔄 DIAGNOSTIC: AudioUnit instantiate callback called")
+                    guard let self = self else {
+                        print("❌ DIAGNOSTIC: Self is nil in instantiate callback")
                         completion(track_index_t(999))
                         return
                     }
                     
+                    guard let avAudioUnit = avAudioUnit else {
+                        print("❌ DIAGNOSTIC: AudioUnit instantiation failed - avAudioUnit is nil")
+                        completion(track_index_t(999))
+                        return
+                    }
+                    
+                    print("✅ DIAGNOSTIC: AudioUnit instantiated successfully")
+                    
                     // PERFORMANCE: Execute on main thread for immediate connection
                     DispatchQueue.main.async {
+                        print("🔄 DIAGNOSTIC: Executing on main thread")
                         if let normalizedPath = self.normalizePath(sf2Path, isAsset: isAsset) {
+                            print("✅ DIAGNOSTIC: Path normalized: \(normalizedPath)")
                             let url = URL(fileURLWithPath: normalizedPath)
                             
+                            print("🎵 DIAGNOSTIC: Loading SoundFont...")
                             // High-performance SF2 loading with immediate connection
                             loadSoundFont(avAudioUnit: avAudioUnit, soundFontURL: url, presetIndex: presetIndex)
+                            print("✅ DIAGNOSTIC: SoundFont loaded")
+                            
                             let trackIndex = self.nextTrackIndex()
+                            print("🎯 DIAGNOSTIC: Created track index: \(trackIndex)")
                             
                             // CRITICAL: Connect immediately and register AudioUnit
                             self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
+                            print("✅ DIAGNOSTIC: AudioUnit connected")
+                            
                             self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
+                            print("✅ DIAGNOSTIC: AudioUnit registered with track \(trackIndex)")
                             
                             completion(trackIndex)
+                            print("🎉 DIAGNOSTIC: SF2 track creation completed successfully!")
                         } else {
-                            print("[ERROR] Path normalization failed for \(sf2Path)")
+                            print("❌ DIAGNOSTIC: Path normalization failed for \(sf2Path)")
                             completion(track_index_t(999))
                         }
                     }
                 }
             } else {
-                print("[ERROR] Apple Sampler component not found")
+                print("❌ DIAGNOSTIC: Apple Sampler component not found in \(avAudioUnitComponents.count) components")
+                for component in avAudioUnitComponents {
+                    print("   - Available: \(component.name) by \(component.manufacturerName)")
+                }
                 completion(track_index_t(999))
             }
         }

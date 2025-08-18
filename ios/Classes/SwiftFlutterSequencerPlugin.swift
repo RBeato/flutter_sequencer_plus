@@ -294,49 +294,75 @@ func getBufferAvailableCount(trackIndex: track_index_t) -> UInt32 {
 func handleEventsNow(trackIndex: track_index_t, eventData: UnsafePointer<UInt8>, eventsCount: UInt32) {
     // CRITICAL: This should appear in system logs if function is called
     NSLog("🚨🚨🚨 FUNCTION ENTRY: handleEventsNow track=%d count=%d", trackIndex, eventsCount)
-    print("🚀 NATIVE FFI: handleEventsNow track=\(trackIndex) count=\(eventsCount)")
+    print("🚨🚨🚨 NATIVE FFI ENTRY: handleEventsNow track=\(trackIndex) count=\(eventsCount)")
     
     guard let engine = plugin.engine else {
         NSLog("❌❌❌ ENGINE NOT AVAILABLE")
+        print("❌❌❌ NATIVE FFI: ENGINE NOT AVAILABLE")
         return
     }
     
     NSLog("✅✅✅ Engine available, processing events...")
+    print("✅✅✅ NATIVE FFI: Engine available, processing events...")
+    
+    // CRITICAL TEST: Check if we reach this point
+    print("🧪 CRITICAL TEST: About to start event processing")
+    NSLog("🧪 CRITICAL TEST: About to start event processing")
     
     // FIXED: Direct MIDI processing with detailed diagnostics
     NSLog("🎵 Processing %d events for track %d", eventsCount, trackIndex)
+    print("🎵 NATIVE FFI: Processing \(eventsCount) events for track \(trackIndex)")
     
-    // Parse and send MIDI events directly
+    // SIMPLIFIED: Safe MIDI processing to identify the crash point
+    guard eventsCount > 0 else {
+        NSLog("⚠️ No events to process")
+        return
+    }
+    
+    NSLog("🎯 SAFE: Processing %d events", eventsCount)
+    
+    // Process each event with minimal unsafe operations
     for i in 0..<Int(eventsCount) {
-        let offset = i * 16 // 16 bytes per SchedulerEvent
+        let offset = i * 16 // 16 bytes per SchedulerEvent structure
         
-        // Read the event type (4 bytes at offset 4)
-        let eventType = eventData.advanced(by: offset + 4).withMemoryRebound(to: UInt32.self, capacity: 1) { ptr in
-            return ptr.pointee
+        NSLog("📍 SAFE: Event %d at offset %d", i, offset)
+        
+        // Safe bounds check
+        let totalBytes = Int(eventsCount) * 16
+        guard offset + 16 <= totalBytes else {
+            NSLog("❌ SAFE: Bounds error for event %d", i)
+            continue
         }
         
-        NSLog("🔍 Event %d: type=%d", i, eventType)
+        // Extract raw bytes safely
+        let eventBytes = UnsafeBufferPointer(start: eventData.advanced(by: offset), count: 16)
+        
+        // Read event type from bytes 4-7 (UInt32)
+        let eventTypeBytes = Array(eventBytes[4..<8])
+        let eventType = eventTypeBytes.withUnsafeBytes { $0.load(as: UInt32.self) }
+        
+        NSLog("🔍 SAFE: Event %d type=%d", i, eventType)
         
         if eventType == 0 { // MIDI_EVENT
-            // MIDI data is in the data[8] array starting at offset 8
-            let midiStatus = eventData.advanced(by: offset + 8).pointee   // data[0]
-            let midiData1 = eventData.advanced(by: offset + 9).pointee    // data[1]  
-            let midiData2 = eventData.advanced(by: offset + 10).pointee   // data[2]
+            // MIDI data starts at byte 8
+            let midiStatus = eventBytes[8]
+            let midiData1 = eventBytes[9]
+            let midiData2 = eventBytes[10]
             
-            NSLog("🎵 MIDI Event: track=%d status=0x%02X note=%d vel=%d", trackIndex, midiStatus, midiData1, midiData2)
+            NSLog("🎵 SAFE: MIDI track=%d status=0x%02X note=%d vel=%d", trackIndex, midiStatus, midiData1, midiData2)
             
-            // Send directly to CocoaEngine
+            // Send to engine
             engine.sendMIDIEvent(trackIndex: trackIndex, midiStatus: midiStatus, midiData1: midiData1, midiData2: midiData2)
+            
         } else if eventType == 1 { // VOLUME_EVENT
-            // Volume is stored as a float in the data array
-            let volume = eventData.advanced(by: offset + 8).withMemoryRebound(to: Float.self, capacity: 1) { ptr in
-                return ptr.pointee
-            }
-            NSLog("🔊 Volume Event: track=%d volume=%f", trackIndex, volume)
-        } else {
-            NSLog("⚠️ Unknown event type: %d", eventType)
+            // Volume stored as float at bytes 8-11
+            let volumeBytes = Array(eventBytes[8..<12])
+            let volume = volumeBytes.withUnsafeBytes { $0.load(as: Float.self) }
+            NSLog("🔊 SAFE: Volume track=%d vol=%f", trackIndex, volume)
         }
     }
+    
+    NSLog("✅ SAFE: All events processed")
 }
 
 @_cdecl("schedule_events")
