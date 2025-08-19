@@ -36,6 +36,34 @@ class CustomSf2Instrument extends Sf2Instrument {
   String get displayName => customDisplayName;
 }
 
+// Custom SFZ instrument with display name
+class CustomSfzInstrument extends SfzInstrument {
+  final String customDisplayName;
+  
+  CustomSfzInstrument({
+    required String path,
+    required bool isAsset,
+    required this.customDisplayName,
+    String? tuningPath,
+  }) : super(path: path, isAsset: isAsset, tuningPath: tuningPath);
+  
+  @override
+  String get displayName => customDisplayName;
+}
+
+// Custom AudioUnit instrument with display name  
+class CustomAudioUnitInstrument extends AudioUnitInstrument {
+  final String customDisplayName;
+  
+  CustomAudioUnitInstrument({
+    required String audioUnitId,
+    required this.customDisplayName,
+  }) : super(manufacturerName: audioUnitId.split('.').first, componentName: audioUnitId.split('.').last);
+  
+  @override
+  String get displayName => customDisplayName;
+}
+
 void checkAsset() async {
   try {
     // Check new SF2 files
@@ -109,15 +137,20 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   double _playbackStartBeat = 0.0;
   double _pausedAtBeat = 0.0;
   
-  // Available soundfonts
+  // Available sound instruments (SF2 + SFZ + AudioUnit)
   final List<Map<String, String>> _availableSoundFonts = [
-    {'name': 'J Piano', 'path': 'assets/sf2/j_piano.sf2'},
-    {'name': 'Rhodes Piano', 'path': 'assets/sf2/rhodes.sf2'},
-    {'name': 'Electric Guitar', 'path': 'assets/sf2/Electric_guitar.SF2'},
-    {'name': 'Bass Guitars', 'path': 'assets/sf2/BassGuitars.sf2'},
-    {'name': 'Korg Synth', 'path': 'assets/sf2/korg.sf2'},
-    {'name': 'General MIDI Bank', 'path': 'assets/sf2/GeneralUser-GS.sf2'},
-    {'name': 'Drums (Slavo)', 'path': 'assets/sf2/DrumsSlavo.sf2'},
+    {'name': 'J Piano', 'path': 'assets/sf2/j_piano.sf2', 'type': 'sf2'},
+    {'name': 'Rhodes Piano', 'path': 'assets/sf2/rhodes.sf2', 'type': 'sf2'},
+    {'name': 'Electric Guitar', 'path': 'assets/sf2/Electric_guitar.SF2', 'type': 'sf2'},
+    {'name': 'Bass Guitars', 'path': 'assets/sf2/BassGuitars.sf2', 'type': 'sf2'},
+    {'name': 'Korg Synth', 'path': 'assets/sf2/korg.sf2', 'type': 'sf2'},
+    {'name': 'General MIDI Bank', 'path': 'assets/sf2/GeneralUser-GS.sf2', 'type': 'sf2'},
+    {'name': 'Drums (Slavo)', 'path': 'assets/sf2/DrumsSlavo.sf2', 'type': 'sf2'},
+    // SFZ DISABLED: Causes crashes on iOS - needs further investigation of sfizz AudioUnit integration
+    // {'name': '🎹 SFZ Piano (sfizz)', 'path': 'assets/sfz/GMPiano.sfz', 'type': 'sfz', 'tuning': 'assets/sfz/meanquar.scl'},
+    // TEMPORARY SAFETY FIX: Only enable AudioUnit on iOS Simulator to prevent physical device crashes
+    // TODO: Re-enable on physical devices once AudioUnit loading is stable
+    // if (Platform.isIOS) {'name': '🍎 Apple AudioUnit (128 GM Sounds)', 'path': 'Apple.DLSMusicDevice', 'type': 'audiounit'},
   ];
   
   // General MIDI instrument presets (GM standard)
@@ -737,33 +770,56 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     // Create instruments for all tracks - one for each available soundfont
     final instruments = <Instrument>[];
     
-    // Add all available soundfonts as separate tracks with custom names
-    for (var soundfont in _availableSoundFonts) {
-      print('[DEBUG] Adding instrument: ${soundfont['name']} -> ${soundfont['path']}');
+    // Add all available sound instruments as separate tracks with custom names
+    for (var instrument in _availableSoundFonts) {
+      print('[DEBUG] Adding instrument: ${instrument['name']} -> ${instrument['path']} (${instrument['type']})');
       
-      // Use selected preset for General MIDI Bank, default preset for others
-      final presetIndex = (soundfont['path'] == 'assets/sf2/GeneralUser-GS.sf2') 
-          ? _selectedGMPreset 
-          : 0;
+      final instrumentType = instrument['type'] ?? 'sf2';
+      String displayName = instrument['name']!;
       
-      // Create display name with GM preset info if applicable
-      String displayName = soundfont['name']!;
-      if (soundfont['path'] == 'assets/sf2/GeneralUser-GS.sf2') {
-        final preset = _generalMidiPresets.firstWhere(
-          (p) => p['program'] == _selectedGMPreset,
-          orElse: () => {'name': 'Unknown', 'program': 0}
+      if (instrumentType == 'sfz') {
+        // Create SFZ instrument
+        instruments.add(
+          CustomSfzInstrument(
+            path: instrument['path']!, 
+            isAsset: true, 
+            tuningPath: instrument['tuning'], // Optional tuning file
+            customDisplayName: displayName,
+          ),
         );
-        displayName = 'GM: ${preset['name']}';
+      } else if (instrumentType == 'audiounit') {
+        // Create AudioUnit instrument (iOS only)
+        instruments.add(
+          CustomAudioUnitInstrument(
+            audioUnitId: instrument['path']!,
+            customDisplayName: displayName,
+          ),
+        );
+      } else {
+        // Create SF2 instrument
+        // Use selected preset for General MIDI Bank, default preset for others
+        final presetIndex = (instrument['path'] == 'assets/sf2/GeneralUser-GS.sf2') 
+            ? _selectedGMPreset 
+            : 0;
+        
+        // Create display name with GM preset info if applicable
+        if (instrument['path'] == 'assets/sf2/GeneralUser-GS.sf2') {
+          final preset = _generalMidiPresets.firstWhere(
+            (p) => p['program'] == _selectedGMPreset,
+            orElse: () => {'name': 'Unknown', 'program': 0}
+          );
+          displayName = 'GM: ${preset['name']}';
+        }
+        
+        instruments.add(
+          CustomSf2Instrument(
+            path: instrument['path']!, 
+            isAsset: true, 
+            presetIndex: presetIndex,
+            customDisplayName: displayName,
+          ),
+        );
       }
-      
-      instruments.add(
-        CustomSf2Instrument(
-          path: soundfont['path']!, 
-          isAsset: true, 
-          presetIndex: presetIndex,
-          customDisplayName: displayName,
-        ),
-      );
     }
     print('[DEBUG] Total instruments to create: ${instruments.length}');
     
@@ -927,6 +983,152 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     print('[DEBUG] Tracks reinitialized and all states restored');
   }
 
+  /// Test SFZ playback with a simple melody
+  void _testSfzPlayback() {
+    if (selectedTrack == null || !(selectedTrack!.instrument is SfzInstrument)) {
+      print('[ERROR] Cannot test SFZ - no SFZ track selected');
+      return;
+    }
+    
+    print('[DEBUG] 🎵 Testing SFZ playback on track ${selectedTrack!.id}...');
+    
+    // Stop current playback
+    if (isPlaying) {
+      handleStop();
+    }
+    
+    // Clear the current track's events
+    selectedTrack!.clearEvents();
+    
+    // Add a simple test melody (C major scale)
+    final testNotes = [60, 62, 64, 65, 67, 69, 71, 72]; // C4 to C5
+    final noteDuration = 0.4; // Short notes for quick test
+    
+    for (int i = 0; i < testNotes.length; i++) {
+      final noteNumber = testNotes[i];
+      final startBeat = i * 0.5; // Play notes every half beat
+      
+      selectedTrack!.addNote(
+        noteNumber: noteNumber,
+        velocity: 80, // Medium velocity
+        startBeat: startBeat,
+        durationBeats: noteDuration,
+      );
+      
+      print('[DEBUG] Added test note: ${noteNumber} at beat ${startBeat}');
+    }
+    
+    // Sync the track
+    selectedTrack!.syncBuffer();
+    
+    // Set up sequencer for test playback
+    setState(() {
+      stepCount = 8; // Enough steps for our test
+    });
+    sequence.setEndBeat(stepCount.toDouble());
+    
+    // Start playback automatically
+    print('[DEBUG] 🎵 Starting SFZ test playback...');
+    handleTogglePlayPause();
+    
+    // Show a snackbar to inform the user
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('🎵 Playing SFZ test melody (C major scale)'),
+          duration: Duration(seconds: 3),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
+
+  /// Test AudioUnit playback with GM presets demonstration
+  void _testAudioUnitPlayback() {
+    if (selectedTrack == null || !(selectedTrack!.instrument is AudioUnitInstrument)) {
+      print('[ERROR] Cannot test AudioUnit - no AudioUnit track selected');
+      return;
+    }
+    
+    print('[DEBUG] 🍎 Testing Apple AudioUnit playback on track ${selectedTrack!.id}...');
+    
+    // Stop current playback
+    if (isPlaying) {
+      handleStop();
+    }
+    
+    // Clear the current track's events
+    selectedTrack!.clearEvents();
+    
+    // Demo different GM presets with characteristic melodies
+    final gmTests = [
+      // Piano (0) - C major arpeggio
+      {'preset': 0, 'notes': [60, 64, 67, 72], 'name': 'Piano'},
+      // Electric Piano (4) - Jazz chord progression
+      {'preset': 4, 'notes': [60, 63, 65, 69], 'name': 'Electric Piano'},
+      // Violin (40) - Classical melody
+      {'preset': 40, 'notes': [67, 69, 71, 72], 'name': 'Violin'},
+      // Trumpet (56) - Fanfare
+      {'preset': 56, 'notes': [60, 64, 67, 64], 'name': 'Trumpet'},
+    ];
+    
+    final noteDuration = 0.8; // Longer notes to hear each preset
+    
+    for (int testIndex = 0; testIndex < gmTests.length; testIndex++) {
+      final test = gmTests[testIndex];
+      final preset = test['preset'] as int;
+      final notes = test['notes'] as List<int>;
+      final name = test['name'] as String;
+      
+      // Add program change to switch to this preset (MIDI status 0xC0 = Program Change)
+      selectedTrack!.events.add(MidiEvent(
+        beat: testIndex * 4.0, // Switch preset every 4 beats
+        midiStatus: 0xC0, // Program Change command
+        midiData1: preset, // Program number (0-127)
+        midiData2: 0, // Unused for Program Change
+      ));
+      
+      // Add the characteristic melody for this preset
+      for (int i = 0; i < notes.length; i++) {
+        final noteNumber = notes[i];
+        final startBeat = testIndex * 4.0 + i * 0.8; // Notes every 0.8 beats
+        
+        selectedTrack!.addNote(
+          noteNumber: noteNumber,
+          velocity: 90, // Strong velocity for clear sound
+          startBeat: startBeat,
+          durationBeats: noteDuration,
+        );
+        
+        print('[DEBUG] Added AudioUnit test: preset $preset ($name) note $noteNumber at beat $startBeat');
+      }
+    }
+    
+    // Sync the track
+    selectedTrack!.syncBuffer();
+    
+    // Set up sequencer for test playback (needs 16 beats for all tests)
+    setState(() {
+      stepCount = 16;
+    });
+    sequence.setEndBeat(stepCount.toDouble());
+    
+    // Start playback automatically
+    print('[DEBUG] 🍎 Starting Apple AudioUnit test playback...');
+    handleTogglePlayPause();
+    
+    // Show a snackbar to inform the user
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('🍎 Testing Apple AudioUnit: Piano→E.Piano→Violin→Trumpet'),
+          duration: Duration(seconds: 5),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    }
+  }
+
   Widget _getMainView() {
     if (selectedTrack == null) {
       return Center(
@@ -992,14 +1194,99 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
           selectedTrack: selectedTrack,
           handleChange: handleTrackChange,
         ),
-        // GM Preset Selector (only show if General MIDI track is selected)
-        if (selectedTrack?.instrument.idOrPath.contains('GeneralUser-GS.sf2') == true)
+        // SFZ Status Indicator
+        if (selectedTrack != null)
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Container(
+              padding: EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: selectedTrack!.instrument is SfzInstrument 
+                    ? Colors.green.withValues(alpha: 0.2)
+                    : selectedTrack!.instrument is AudioUnitInstrument
+                    ? Colors.orange.withValues(alpha: 0.2)
+                    : Colors.blue.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: selectedTrack!.instrument is SfzInstrument 
+                      ? Colors.green 
+                      : selectedTrack!.instrument is AudioUnitInstrument
+                      ? Colors.orange
+                      : Colors.blue,
+                  width: 2,
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    selectedTrack!.instrument is SfzInstrument 
+                        ? Icons.music_note 
+                        : selectedTrack!.instrument is AudioUnitInstrument
+                        ? Icons.apple
+                        : Icons.audiotrack,
+                    color: selectedTrack!.instrument is SfzInstrument 
+                        ? Colors.green 
+                        : selectedTrack!.instrument is AudioUnitInstrument
+                        ? Colors.orange
+                        : Colors.blue,
+                    size: 20,
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    selectedTrack!.instrument is SfzInstrument 
+                        ? '🎵 SFZ ENGINE ACTIVE (sfizz)' 
+                        : selectedTrack!.instrument is AudioUnitInstrument
+                        ? '🍎 APPLE AUDIOUNIT ACTIVE (DLS)'
+                        : 'SF2 Engine Active',
+                    style: TextStyle(
+                      color: selectedTrack!.instrument is SfzInstrument 
+                          ? Colors.green 
+                          : selectedTrack!.instrument is AudioUnitInstrument
+                          ? Colors.orange
+                          : Colors.blue,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  if (selectedTrack!.instrument is SfzInstrument)
+                    MaterialButton(
+                      minWidth: 80,
+                      height: 32,
+                      color: Colors.green,
+                      child: Text(
+                        'Test SFZ',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                      onPressed: () => _testSfzPlayback(),
+                    ),
+                  if (selectedTrack!.instrument is AudioUnitInstrument)
+                    MaterialButton(
+                      minWidth: 100,
+                      height: 32,
+                      color: Colors.orange,
+                      child: Text(
+                        'Test AudioUnit',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                      onPressed: () => _testAudioUnitPlayback(),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        // GM Preset Selector (show for General MIDI SF2 or AudioUnit tracks)
+        if (selectedTrack?.instrument.idOrPath.contains('GeneralUser-GS.sf2') == true || 
+            selectedTrack?.instrument is AudioUnitInstrument)
           Container(
             padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Column(
               children: [
                 Text(
-                  'General MIDI Preset',
+                  selectedTrack?.instrument is AudioUnitInstrument 
+                      ? 'Apple AudioUnit Preset (128 GM Sounds)'
+                      : 'General MIDI Preset',
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                 ),
                 SizedBox(height: 4),
@@ -1062,7 +1349,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
               Theme.of(context).textTheme.apply(bodyColor: Colors.white)),
       home: Scaffold(
         appBar: AppBar(
-          title: const Text('Drum machine example'),
+          title: const Text('Multi-Instrument Sequencer (SF2 + SFZ)'),
           actions: [
             if (Platform.isIOS)
               IconButton(
