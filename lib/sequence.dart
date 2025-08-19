@@ -4,6 +4,7 @@ import 'dart:math';
 import 'constants.dart';
 import 'global_state.dart';
 import 'models/instrument.dart';
+import 'models/instrument_error.dart';
 import 'native_bridge.dart';
 import 'track.dart';
 
@@ -55,15 +56,20 @@ class Sequence {
 
   /// Creates tracks in the underlying sequencer engine.
   Future<List<Track>> createTracks(List<Instrument> instruments) async {
+    final result = await createTracksWithErrorInfo(instruments);
+    return result.tracks.cast<Track>();
+  }
+
+  /// Creates tracks with detailed error information for each instrument.
+  Future<TracksCreationResult> createTracksWithErrorInfo(List<Instrument> instruments) async {
     if (globalState.isEngineReady) {
-      return _createTracks(instruments);
+      return _createTracksWithErrorInfo(instruments);
     } else {
-      final completer = Completer<List<Track>>.sync();
+      final completer = Completer<TracksCreationResult>.sync();
 
       globalState.onEngineReady(() async {
-        final tracks = await _createTracks(instruments);
-
-        completer.complete(tracks);
+        final result = await _createTracksWithErrorInfo(instruments);
+        completer.complete(result);
       });
 
       return completer.future;
@@ -332,21 +338,41 @@ class Sequence {
     return globalState.usToFrames(microsecondsSinceLastRender);
   }
 
-  Future<Track?> _createTrack(Instrument instrument) async {
-    final track = await Track.build(sequence: this, instrument: instrument);
+  Future<InstrumentLoadResult<Track>> _createTrackWithErrorInfo(Instrument instrument) async {
+    final result = await Track.buildWithErrorInfo(sequence: this, instrument: instrument);
 
-    if (track != null) {
-      _tracks.putIfAbsent(track.id, () => track);
+    if (result.isSuccess) {
+      _tracks.putIfAbsent(result.data!.id, () => result.data!);
     }
 
-    return track;
+    return result;
+  }
+
+  Future<Track?> _createTrack(Instrument instrument) async {
+    final result = await _createTrackWithErrorInfo(instrument);
+    return result.data;
+  }
+
+  Future<TracksCreationResult> _createTracksWithErrorInfo(List<Instrument> instruments) async {
+    final results = await Future.wait(
+        instruments.map((instrument) => _createTrackWithErrorInfo(instrument)));
+    
+    final tracks = <Track>[];
+    final errors = <InstrumentError>[];
+    
+    for (final result in results) {
+      if (result.isSuccess) {
+        tracks.add(result.data!);
+      } else {
+        errors.add(result.error!);
+      }
+    }
+    
+    return TracksCreationResult(tracks: tracks, errors: errors);
   }
 
   Future<List<Track>> _createTracks(List<Instrument> instruments) async {
-    final tracks = await Future.wait(
-        instruments.map((instrument) => _createTrack(instrument)));
-    final nonNullTracks = tracks.whereType<Track>().toList();
-
-    return nonNullTracks;
+    final result = await _createTracksWithErrorInfo(instruments);
+    return result.tracks.cast<Track>();
   }
 }

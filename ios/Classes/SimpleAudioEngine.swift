@@ -449,6 +449,10 @@ public class SimpleAudioEngine {
     
     public func play() {
         print("[SimpleAudioEngine] Starting playback")
+        
+        // CRITICAL FIX: Reset position to 0 when starting playback
+        currentPosition = 0
+        lastAudioTime = 0
         playbackStartTime = Date()
         
         if !audioEngine.isRunning {
@@ -468,7 +472,6 @@ public class SimpleAudioEngine {
             }
         } else {
             // Engine already running, just resume playback
-            playbackStartTime = Date()
             startPositionTracking()
         }
     }
@@ -498,9 +501,15 @@ public class SimpleAudioEngine {
     
     public func pause() {
         print("[SimpleAudioEngine] Pausing playback")
+        
+        // CRITICAL FIX: Reset position to 0 when stopping
+        currentPosition = 0
+        lastAudioTime = 0
         playbackStartTime = nil
+        
         positionUpdateTimer?.invalidate()
         positionUpdateTimer = nil
+        
         if audioEngine.isRunning {
             audioEngine.stop()
         }

@@ -256,11 +256,14 @@ func resetTrack(trackIndex: track_index_t) {
 
 @_cdecl("get_position")
 func getPosition() -> position_frame_t {
-    guard let engine = plugin.engine, let scheduler = engine.scheduler else {
-        print("[DEBUG] Scheduler not available, returning 0")
+    guard let engine = plugin.engine else {
+        print("[DEBUG] Engine not available, returning 0")
         return 0
     }
-    return position_frame_t(SchedulerGetPosition(scheduler))
+    
+    // CRITICAL FIX: Get position from CocoaEngine's position tracking
+    // Since scheduler is nil, we use the engine's own position
+    return position_frame_t(engine.getPosition())
 }
 
 @_cdecl("get_track_volume")
@@ -409,4 +412,13 @@ func enginePause() {
         return
     }
     engine.pause()
+}
+
+@_cdecl("engine_stop")
+func engineStop() {
+    guard let engine = plugin.engine else {
+        print("[DEBUG] Engine not available, skipping stop")
+        return
+    }
+    engine.stop()
 }

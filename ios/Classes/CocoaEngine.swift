@@ -14,6 +14,13 @@ public class CocoaEngine {
     private var unsafeAvAudioUnits: [track_index_t: AVAudioUnit] = [:]
     private var nextTrackId: track_index_t = 0
     
+    // CRITICAL FIX: Position tracking for audio-visual sync
+    private var playbackStartSampleTime: AVAudioFramePosition = 0
+    private var pausedAtSampleTime: AVAudioFramePosition = 0
+    private var isPlaying: Bool = false
+    private var isPaused: Bool = false
+    private var playbackStartTime: Date?
+    
     init(sampleRateCallbackPort: Dart_Port, registrar: FlutterPluginRegistrar) {
         self.registrar = registrar
         
@@ -154,9 +161,29 @@ public class CocoaEngine {
     func play() {
         print("[DEBUG] HIGH-PERF play() - Engine running: \(engine.isRunning)")
         print("[DEBUG] Connected AudioUnits: \(self.unsafeAvAudioUnits.count)")
+        print("[DEBUG] Play state: isPlaying=\(isPlaying), isPaused=\(isPaused)")
         
         guard Thread.isMainThread else {
             DispatchQueue.main.async { self.play() }
+            return
+        }
+        
+        // CRITICAL FIX: Handle pause/resume state properly
+        if isPaused {
+            // Resume from paused position
+            playbackStartTime = Date()
+            isPlaying = true
+            isPaused = false
+            print("[DEBUG] RESUMING from sample \(pausedAtSampleTime)")
+        } else if !isPlaying {
+            // Fresh start
+            playbackStartSampleTime = 0
+            pausedAtSampleTime = 0
+            playbackStartTime = Date()
+            isPlaying = true
+            print("[DEBUG] STARTING fresh from position 0")
+        } else {
+            print("[DEBUG] Already playing, ignoring play() call")
             return
         }
         
@@ -181,11 +208,33 @@ public class CocoaEngine {
     }
     
     func pause() {
-        print("[DEBUG] CocoaEngine.pause() - Clean SF2 system with proper lifecycle")
+        print("[DEBUG] CocoaEngine.pause() - Current state: isPlaying=\(isPlaying)")
         
         guard Thread.isMainThread else {
             DispatchQueue.main.async { self.pause() }
             return
+        }
+        
+        // CRITICAL FIX: Save position for resume, don't reset  
+        if isPlaying {
+            // Calculate current position before pausing
+            if let startTime = playbackStartTime {
+                let elapsed = Date().timeIntervalSince(startTime)
+                pausedAtSampleTime = playbackStartSampleTime + AVAudioFramePosition(elapsed * outputFormat.sampleRate)
+            } else {
+                pausedAtSampleTime = playbackStartSampleTime
+            }
+            isPaused = true
+            isPlaying = false
+            print("[DEBUG] PAUSED at sample \(pausedAtSampleTime)")
+        } else {
+            // Full stop - reset everything
+            isPlaying = false
+            isPaused = false
+            playbackStartSampleTime = 0
+            pausedAtSampleTime = 0
+            playbackStartTime = nil
+            print("[DEBUG] STOPPED - all positions reset to 0")
         }
         
         // Pause scheduler if available
@@ -194,11 +243,9 @@ public class CocoaEngine {
             print("[DEBUG] Scheduler paused")
         }
         
-        // IMPROVED: Proper engine lifecycle management to prevent freezes
+        // CRITICAL FIX: Keep engine running to preserve SF2 AudioUnit connections
+        // Only send note-off messages to stop hanging notes, don't stop the engine
         if self.engine.isRunning {
-            // Stop engine gracefully
-            self.engine.stop()
-            
             // Send note off to all connected AudioUnits to prevent hanging notes
             for (trackId, audioUnit) in self.unsafeAvAudioUnits {
                 for noteNumber in 0...127 {
@@ -208,7 +255,53 @@ public class CocoaEngine {
                 print("[DEBUG] Sent all notes off to track \(trackId)")
             }
             
-            print("[DEBUG] Engine stopped gracefully")
+            print("[DEBUG] Engine kept running to preserve SF2 connections")
+        }
+    }
+    
+    func stop() {
+        print("[DEBUG] CocoaEngine.stop() - Full stop and reset")
+        
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.stop() }
+            return
+        }
+        
+        // Reset all playback state
+        isPlaying = false
+        isPaused = false
+        playbackStartSampleTime = 0
+        pausedAtSampleTime = 0
+        playbackStartTime = nil
+        
+        // Stop scheduler if available
+        if let scheduler = scheduler {
+            SchedulerPause(scheduler)
+        }
+        
+        // Send note-off to all tracks
+        if self.engine.isRunning {
+            for (trackId, audioUnit) in self.unsafeAvAudioUnits {
+                for noteNumber in 0...127 {
+                    let noteOffCommand: UInt32 = 0x80
+                    let _ = MusicDeviceMIDIEvent(audioUnit.audioUnit, noteOffCommand, UInt32(noteNumber), 0, 0)
+                }
+            }
+        }
+        
+        print("[DEBUG] Stop complete - all state reset")
+    }
+    
+    func getPosition() -> UInt32 {
+        // CRITICAL FIX: Return actual position for proper sync
+        if isPlaying, let startTime = playbackStartTime {
+            let elapsed = Date().timeIntervalSince(startTime)
+            let currentSample = playbackStartSampleTime + AVAudioFramePosition(elapsed * outputFormat.sampleRate)
+            return UInt32(max(0, currentSample))
+        } else if isPaused {
+            return UInt32(max(0, pausedAtSampleTime))
+        } else {
+            return 0
         }
     }
     

@@ -30,6 +30,7 @@ class NativeBridge {
   static late final Pointer<NativeFunction<Void Function(Uint32, Uint32)>> _clearEvents;
   static late final Pointer<NativeFunction<Void Function()>> _enginePlay;
   static late final Pointer<NativeFunction<Void Function()>> _enginePause;
+  static late final Pointer<NativeFunction<Void Function()>> _engineStop;
 
   static void _registerDartPostCObject() {
     try {
@@ -86,6 +87,13 @@ class NativeBridge {
     _clearEvents = _lib!.lookup<NativeFunction<Void Function(Uint32, Uint32)>>('clear_events');
     _enginePlay = _lib!.lookup<NativeFunction<Void Function()>>('engine_play');
     _enginePause = _lib!.lookup<NativeFunction<Void Function()>>('engine_pause');
+    // Try to look up engine_stop, but don't fail if it doesn't exist (for backward compatibility)
+    try {
+      _engineStop = _lib!.lookup<NativeFunction<Void Function()>>('engine_stop');
+    } catch (e) {
+      print('[DEBUG] NativeBridge: engine_stop not found, using engine_pause for stops');
+      _engineStop = _enginePause; // Fallback to pause for older implementations
+    }
 
     // CRITICAL: Register Dart's PostCObject function to enable FFI callbacks
     // This allows native code to send messages back to Dart
@@ -309,17 +317,12 @@ class NativeBridge {
       int sampleRate, double tempo) {
     if (events.isEmpty) return 0;
     
-    print('[DEBUG] NativeBridge.handleEventsNow: track=$trackIndex events=${events.length}');
-    print('[CRITICAL DEBUG] About to call native FFI function handle_events_now');
-    
     _ensureInitialized();
     final serializedData = _serializeEvents(events, sampleRate, tempo);
     final handleEventsNow = _handleEventsNow.asFunction<void Function(int, Pointer<Uint8>, int)>();
     
     try {
-      print('[CRITICAL DEBUG] Calling native handle_events_now with track=$trackIndex, eventCount=${serializedData.eventCount}');
       handleEventsNow(trackIndex, serializedData.rawData, serializedData.eventCount);
-      print('[CRITICAL DEBUG] Native handle_events_now call completed');
     } catch (e) {
       print('[ERROR] Native handle_events_now call failed: $e');
     } finally {
@@ -359,6 +362,12 @@ class NativeBridge {
     final enginePause = _enginePause.asFunction<void Function()>();
     enginePause();
   }
+  
+  static void stop() {
+    _ensureInitialized();
+    final engineStop = _engineStop.asFunction<void Function()>();
+    engineStop();
+  }
 
   static _SerializedEventData _serializeEvents(List<SchedulerEvent> events,
       int sampleRate, double tempo) {
@@ -375,7 +384,7 @@ class NativeBridge {
       
       // Copy the properly serialized bytes to our raw data buffer
       for (int j = 0; j < bytesPerEvent; j++) {
-        rawData.elementAt(offset + j).value = serializedBytes.getUint8(j);
+        (rawData + offset + j).value = serializedBytes.getUint8(j);
       }
     }
 

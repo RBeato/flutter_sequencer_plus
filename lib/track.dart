@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'constants.dart';
 import 'models/instrument.dart';
 import 'models/events.dart';
+import 'models/instrument_error.dart';
 import 'native_bridge.dart';
 import 'sequence.dart';
 
@@ -25,64 +26,138 @@ class Track {
   /// Creates a track in the underlying sequencer engine.
   static Future<Track?> build(
       {required Sequence sequence, required Instrument instrument}) async {
+    final result = await buildWithErrorInfo(sequence: sequence, instrument: instrument);
+    return result.data;
+  }
+
+  /// Creates a track with detailed error information.
+  static Future<InstrumentLoadResult<Track>> buildWithErrorInfo(
+      {required Sequence sequence, required Instrument instrument}) async {
     int? id;
 
-    if (instrument is Sf2Instrument) {
-      id = await NativeBridge.addTrackSf2(
-          instrument.idOrPath, instrument.isAsset, instrument.presetIndex);
-    } else if (instrument is SfzInstrument) {
-      final sfzFile = File(instrument.idOrPath);
-      String? normalizedSfzPath;
-
-      if (instrument.isAsset) {
-        final normalizedSfzDir =
-            await NativeBridge.normalizeAssetDir(sfzFile.parent.path);
-
-        if (normalizedSfzDir == null) {
-          throw Exception(
-              'Could not normalize asset dir for ${sfzFile.parent.path}');
+    try {
+      if (instrument is Sf2Instrument) {
+        id = await NativeBridge.addTrackSf2(
+            instrument.idOrPath, instrument.isAsset, instrument.presetIndex);
+        
+        if (id == -1) {
+          return InstrumentLoadResult.error(
+            InstrumentError.invalidFormat(
+              instrument.idOrPath,
+              'SF2 file could not be loaded. Check debug console for technical details.',
+            ),
+          );
         }
-        normalizedSfzPath = '$normalizedSfzDir/${p.basename(sfzFile.path)}';
+      } else if (instrument is SfzInstrument) {
+        final sfzFile = File(instrument.idOrPath);
+        String? normalizedSfzPath;
+
+        if (instrument.isAsset) {
+          final normalizedSfzDir =
+              await NativeBridge.normalizeAssetDir(sfzFile.parent.path);
+
+          if (normalizedSfzDir == null) {
+            return InstrumentLoadResult.error(
+              InstrumentError.assetNotFound(sfzFile.parent.path),
+            );
+          }
+          normalizedSfzPath = '$normalizedSfzDir/${p.basename(sfzFile.path)}';
+        } else {
+          if (!sfzFile.existsSync()) {
+            return InstrumentLoadResult.error(
+              InstrumentError.fileNotFound(instrument.idOrPath),
+            );
+          }
+          normalizedSfzPath = sfzFile.path;
+        }
+
+        id = await NativeBridge.addTrackSfz(
+            normalizedSfzPath, instrument.tuningPath);
+            
+        if (id == -1) {
+          return InstrumentLoadResult.error(
+            InstrumentError.invalidFormat(
+              instrument.idOrPath,
+              'SFZ file could not be loaded. Check debug console for technical details.',
+            ),
+          );
+        }
+      } else if (instrument is RuntimeSfzInstrument) {
+        final sfzContent = instrument.sfz.buildString();
+        String? normalizedSampleRoot;
+
+        if (instrument.isAsset) {
+          normalizedSampleRoot =
+              await NativeBridge.normalizeAssetDir(instrument.sampleRoot);
+
+          if (normalizedSampleRoot == null) {
+            return InstrumentLoadResult.error(
+              InstrumentError.assetNotFound(instrument.sampleRoot),
+            );
+          }
+        } else {
+          final sampleDir = Directory(instrument.sampleRoot);
+          if (!sampleDir.existsSync()) {
+            return InstrumentLoadResult.error(
+              InstrumentError.fileNotFound(instrument.sampleRoot),
+            );
+          }
+          normalizedSampleRoot = instrument.sampleRoot;
+        }
+
+        // Sfizz uses the parent path of this (line 73 of Parser.cpp)
+        final fakeSfzDir = '$normalizedSampleRoot/does_not_exist.sfz';
+
+        id = await NativeBridge.addTrackSfzString(
+            fakeSfzDir, sfzContent, instrument.tuningString);
+            
+        if (id == -1) {
+          return InstrumentLoadResult.error(
+            InstrumentError.invalidFormat(
+              instrument.idOrPath,
+              'Runtime SFZ could not be loaded. Check debug console for technical details.',
+            ),
+          );
+        }
+      } else if (instrument is AudioUnitInstrument) {
+        id = await NativeBridge.addTrackAudioUnit(instrument.idOrPath);
+        
+        if (id == -1) {
+          return InstrumentLoadResult.error(
+            InstrumentError.invalidFormat(
+              instrument.idOrPath,
+              'AudioUnit could not be loaded. Check if the AudioUnit exists on this system.',
+            ),
+          );
+        }
       } else {
-        normalizedSfzPath = sfzFile.path;
+        return InstrumentLoadResult.error(
+          InstrumentError(
+            type: InstrumentErrorType.unknown,
+            message: 'Instrument type not recognized',
+            technicalDetails: 'Supported types: SfzInstrument, Sf2Instrument, RuntimeSfzInstrument, AudioUnitInstrument',
+          ),
+        );
       }
 
-      id = await NativeBridge.addTrackSfz(
-          normalizedSfzPath, instrument.tuningPath);
-    } else if (instrument is RuntimeSfzInstrument) {
-      final sfzContent = instrument.sfz.buildString();
-      String? normalizedSampleRoot;
-
-      if (instrument.isAsset) {
-        normalizedSampleRoot =
-            await NativeBridge.normalizeAssetDir(instrument.sampleRoot);
-
-        if (normalizedSampleRoot == null) {
-          throw Exception(
-              'Could not normalize asset dir for ${instrument.sampleRoot}');
-        }
-      } else {
-        normalizedSampleRoot = instrument.sampleRoot;
-      }
-
-      // Sfizz uses the parent path of this (line 73 of Parser.cpp)
-      final fakeSfzDir = '$normalizedSampleRoot/does_not_exist.sfz';
-
-      id = await NativeBridge.addTrackSfzString(
-          fakeSfzDir, sfzContent, instrument.tuningString);
-    } else if (instrument is AudioUnitInstrument) {
-      id = await NativeBridge.addTrackAudioUnit(instrument.idOrPath);
-    } else {
-      throw Exception('Instrument not recognized');
+      final track = Track._withId(
+        sequence: sequence,
+        id: id!,
+        instrument: instrument,
+      );
+      
+      return InstrumentLoadResult.success(track);
+      
+    } catch (e) {
+      return InstrumentLoadResult.error(
+        InstrumentError(
+          type: InstrumentErrorType.unknown,
+          message: 'Unexpected error during instrument loading',
+          filePath: instrument.idOrPath,
+          technicalDetails: e.toString(),
+        ),
+      );
     }
-
-    if (id == -1) return null;
-
-    return Track._withId(
-      sequence: sequence,
-      id: id!,
-      instrument: instrument,
-    );
   }
 
   // Debounce map to prevent rapid overlapping notes

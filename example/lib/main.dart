@@ -498,10 +498,12 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
           
           // Check if this event should trigger now (within reasonable timing window)
           final eventBeat = event.beat;
-          final eventKey = '${track.id}-${eventBeat.toStringAsFixed(2)}-${event.midiData1}-${event.midiData2}';
           
           // More forgiving timing check - original working tolerance
           if (eventBeat >= currentBeat - 0.15 && eventBeat <= currentBeat + 0.15) {
+            // Generate event key only when needed (after timing check)
+            final eventKey = '${track.id}-${(eventBeat * 100).round()}-${event.midiData1}-${event.midiData2}';
+          
             if (!_processedEvents.contains(eventKey)) {
               // Minimal logging to maintain performance
               if (Platform.isIOS && (event.midiStatus & 0xF0) == 0x90 && event.midiData2 > 0) {
@@ -526,20 +528,23 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       }
     }
     
-    // Clean up old processed events (older than 1 beat)
-    final oldSize = _processedEvents.length;
-    _processedEvents.removeWhere((key) {
-      final parts = key.split('-');
-      if (parts.length >= 2) {
-        final eventBeat = double.tryParse(parts[1]) ?? 0.0;
-        return eventBeat < currentBeat - 1.0;
+    // Clean up old processed events (older than 1 beat) - optimized for new key format
+    if (_processedEvents.length > 100) { // Only clean when necessary
+      final cutoffBeat = (currentBeat - 1.0) * 100; // Convert to same scale as key
+      final oldSize = _processedEvents.length;
+      _processedEvents.removeWhere((key) {
+        final parts = key.split('-');
+        if (parts.length >= 2) {
+          final eventBeatScaled = int.tryParse(parts[1]) ?? 0;
+          return eventBeatScaled < cutoffBeat;
+        }
+        return false;
+      });
+      
+      // Only log significant cleanups
+      if ((oldSize - _processedEvents.length) > 20) {
+        print('[DEBUG] 🧹 Cleaned ${oldSize - _processedEvents.length} old events');
       }
-      return false;
-    });
-    
-    // Reduce cleanup logging - only log significant cleanups
-    if (_processedEvents.length != oldSize && (oldSize - _processedEvents.length) > 5) {
-      print('[DEBUG] 🧹 Cleaned ${oldSize - _processedEvents.length} old events, ${_processedEvents.length} remaining');
     }
   }
 
