@@ -111,6 +111,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   
   // Available soundfonts
   final List<Map<String, String>> _availableSoundFonts = [
+    {'name': 'J Piano', 'path': 'assets/sf2/j_piano.sf2'},
     {'name': 'Rhodes Piano', 'path': 'assets/sf2/rhodes.sf2'},
     {'name': 'Electric Guitar', 'path': 'assets/sf2/Electric_guitar.SF2'},
     {'name': 'Bass Guitars', 'path': 'assets/sf2/BassGuitars.sf2'},
@@ -267,8 +268,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     {'name': 'Gunshot', 'program': 127},
   ];
   
-  // Default lead instrument soundfont
-  String _selectedSoundFont = 'assets/sf2/rhodes.sf2';
+  // Default lead instrument soundfont - now using j_piano.sf2
+  String _selectedSoundFont = 'assets/sf2/j_piano.sf2';
   int _selectedGMPreset = 0; // Default to Acoustic Grand Piano
 
   @override
