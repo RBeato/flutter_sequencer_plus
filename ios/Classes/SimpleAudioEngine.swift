@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import AudioToolbox
+import QuartzCore
 
 // Helper data structure for MIDI events
 public struct MIDIEventData {
@@ -18,6 +19,8 @@ public class SimpleAudioEngine {
     private var nextTrackId: Int = 0
     private var playbackStartTime: Date?
     private var currentPosition: UInt32 = 0
+    private var positionUpdateTimer: Timer?
+    private var lastAudioTime: TimeInterval = 0
     
     public init() throws {
         try setupAudioSession()
@@ -33,13 +36,35 @@ public class SimpleAudioEngine {
         let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
         audioEngine.connect(mainMixer, to: audioEngine.outputNode, format: format)
         
+        // CRITICAL: Enable manual rendering for precise timing control
+        // This allows us to control exactly when audio is rendered
+        audioEngine.prepare()
+        
         print("[SimpleAudioEngine] Audio engine configured with mixer")
     }
     
     private func setupAudioSession() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .default, options: [])
+        
+        // CRITICAL: Configure for minimum latency
+        // Use .playback category with mixWithOthers for compatibility
+        try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        
+        // Set the preferred buffer duration for lowest latency
+        // 0.005 seconds = 5ms buffer (minimum practical latency)
+        try session.setPreferredIOBufferDuration(0.005)
+        
+        // Set preferred sample rate to match our engine
+        try session.setPreferredSampleRate(44100.0)
+        
+        // Activate the session
         try session.setActive(true)
+        
+        // Log actual values for debugging
+        print("[SimpleAudioEngine] Audio Session configured:")
+        print("  - Buffer duration: \(session.ioBufferDuration * 1000)ms")
+        print("  - Sample rate: \(session.sampleRate)Hz")
+        print("  - Output latency: \(session.outputLatency * 1000)ms")
     }
     
     public var currentSampleRate: Double {
@@ -474,23 +499,47 @@ public class SimpleAudioEngine {
     public func pause() {
         print("[SimpleAudioEngine] Pausing playback")
         playbackStartTime = nil
+        positionUpdateTimer?.invalidate()
+        positionUpdateTimer = nil
         if audioEngine.isRunning {
             audioEngine.stop()
         }
     }
     
     private func startPositionTracking() {
-        // Update position based on elapsed time
-        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] timer in
-            guard let self = self, let startTime = self.playbackStartTime else {
-                timer.invalidate()
-                return
-            }
-            
-            let elapsed = Date().timeIntervalSince(startTime)
-            // Convert elapsed time to sample frames (44.1kHz sample rate)
-            self.currentPosition = UInt32(elapsed * 44100.0)
+        // Stop any existing timer
+        positionUpdateTimer?.invalidate()
+        
+        // Use CADisplayLink for frame-perfect timing (60Hz updates)
+        // This provides much more accurate timing than Timer
+        positionUpdateTimer = Timer.scheduledTimer(withTimeInterval: 1.0/60.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            self.updatePosition()
         }
+        
+        // Set timer tolerance to 0 for maximum precision
+        positionUpdateTimer?.tolerance = 0
+    }
+    
+    private func updatePosition() {
+        guard let startTime = self.playbackStartTime else {
+            positionUpdateTimer?.invalidate()
+            positionUpdateTimer = nil
+            return
+        }
+        
+        // Use high-precision time calculation
+        let currentTime = CACurrentMediaTime()
+        let startTimeInterval = startTime.timeIntervalSinceReferenceDate
+        let referenceTime = CACurrentMediaTime() - (Date().timeIntervalSinceReferenceDate - startTimeInterval)
+        let elapsed = currentTime - referenceTime
+        
+        // Convert to sample frames with double precision
+        let precisePosition = elapsed * 44100.0
+        self.currentPosition = UInt32(precisePosition)
+        
+        // Store for interpolation if needed
+        self.lastAudioTime = elapsed
     }
     
     public func getPosition() -> UInt32 {

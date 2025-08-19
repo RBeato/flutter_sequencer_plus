@@ -286,7 +286,13 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     ticker = this.createTicker((Duration elapsed) {
       setState(() {
         tempo = sequence.getTempo();
-        position = sequence.getBeat();
+        // MINIMAL iOS FIX: Use timer position on iOS, native on Android
+        if (Platform.isIOS) {
+          // iOS native position is broken - keep using timer position from _processPlayback
+        } else {
+          // Android works fine with native position
+          position = sequence.getBeat();
+        }
         isPlaying = sequence.getIsPlaying();
 
         // DON'T override trackVolumes - they should only be set by user interaction
@@ -490,19 +496,19 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
             continue; // Skip Program Change - SF2 preset is already loaded
           }
           
-          // Check if this event should trigger now (within a small window)
+          // Check if this event should trigger now (within reasonable timing window)
           final eventBeat = event.beat;
-          final eventKey = '${track.id}-${eventBeat}-${event.midiData1}-${event.midiData2}';
+          final eventKey = '${track.id}-${eventBeat.toStringAsFixed(2)}-${event.midiData1}-${event.midiData2}';
           
-          // Precise timing window - events should trigger when currentBeat crosses them
-          final tolerance = 0.05;
-          if (eventBeat >= currentBeat - tolerance && eventBeat <= currentBeat + tolerance) {
+          // More forgiving timing check - original working tolerance
+          if (eventBeat >= currentBeat - 0.15 && eventBeat <= currentBeat + 0.15) {
             if (!_processedEvents.contains(eventKey)) {
-              // Calculate step number for display (0-based)
-              final stepNumber = eventBeat.floor();
-              // Reduced logging: only log occasionally or for important events
-              if (stepNumber % 4 == 0) { // Only log on beat 1 of each measure
-                print('[DEBUG] ♪ Playing: track=${track.id} step=${stepNumber} beat=${eventBeat} note=${event.midiData1} vel=${event.midiData2}');
+              // Minimal logging to maintain performance
+              if (Platform.isIOS && (event.midiStatus & 0xF0) == 0x90 && event.midiData2 > 0) {
+                final stepNumber = eventBeat.floor();
+                if (stepNumber % 8 == 0) { // Log every 8th step only
+                  print('[DEBUG] Playing: track=${track.id} step=$stepNumber beat=${eventBeat.toStringAsFixed(2)}');
+                }
               }
               
               // Send MIDI event directly
@@ -514,8 +520,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
               );
               
               _processedEvents.add(eventKey);
-            } else {
-              // Suppress duplicate skipping logs - too verbose
             }
           }
         }

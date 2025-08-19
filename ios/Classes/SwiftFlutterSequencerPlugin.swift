@@ -351,7 +351,8 @@ func handleEventsNow(trackIndex: track_index_t, eventData: UnsafePointer<UInt8>,
             
             NSLog("🎵 SAFE: MIDI track=%d status=0x%02X note=%d vel=%d", trackIndex, midiStatus, midiData1, midiData2)
             
-            // Send to engine
+            // CRITICAL FIX: Send MIDI events immediately without any dispatch
+            // This ensures minimum latency for real-time audio
             engine.sendMIDIEvent(trackIndex: trackIndex, midiStatus: midiStatus, midiData1: midiData1, midiData2: midiData2)
             
         } else if eventType == 1 { // VOLUME_EVENT

@@ -40,6 +40,14 @@ class _TempoSelectorState extends State<TempoSelector> {
       widget.handleChange(parsedValue);
     }
   }
+  
+  handleRealTimeChange(String input) {
+    final parsedValue = double.tryParse(input);
+
+    if (parsedValue != null && parsedValue > 0) {
+      widget.handleChange(parsedValue);
+    }
+  }
 
   @override
   void dispose() {
@@ -62,8 +70,9 @@ class _TempoSelectorState extends State<TempoSelector> {
           maxLines: 1,
           keyboardType: TextInputType.number,
           onSubmitted: handleTextChange,
+          onChanged: handleRealTimeChange, // ADDED: Real-time tempo changes
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: InputDecoration(hintText: "..."),
+          decoration: InputDecoration(hintText: "BPM"),
         ),
       ),
     ]);
