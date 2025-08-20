@@ -339,13 +339,33 @@ class Sequence {
   }
 
   Future<InstrumentLoadResult<Track>> _createTrackWithErrorInfo(Instrument instrument) async {
-    final result = await Track.buildWithErrorInfo(sequence: this, instrument: instrument);
+    try {
+      // Add timeout to prevent infinite hanging on track creation
+      final result = await Track.buildWithErrorInfo(sequence: this, instrument: instrument)
+        .timeout(Duration(seconds: 15), onTimeout: () {
+          print('[TIMEOUT] Track creation timed out for instrument: ${instrument.displayName}');
+          return InstrumentLoadResult.error(
+            InstrumentError.invalidFormat(
+              instrument.displayName,
+              'Track creation timed out after 15 seconds. This may indicate a native bridge issue.',
+            ),
+          );
+        });
 
-    if (result.isSuccess) {
-      _tracks.putIfAbsent(result.data!.id, () => result.data!);
+      if (result.isSuccess) {
+        _tracks.putIfAbsent(result.data!.id, () => result.data!);
+      }
+
+      return result;
+    } catch (e) {
+      print('[ERROR] Exception during track creation for ${instrument.displayName}: $e');
+      return InstrumentLoadResult.error(
+        InstrumentError.invalidFormat(
+          instrument.displayName,
+          'Track creation failed: $e',
+        ),
+      );
     }
-
-    return result;
   }
 
   Future<Track?> _createTrack(Instrument instrument) async {

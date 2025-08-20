@@ -31,13 +31,18 @@ Pod::Spec.new do |s|
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
     'ENABLE_TESTABILITY' => 'YES',
     'STRIP_STYLE' => 'non-global',
+    'STRIP_INSTALLED_PRODUCT' => 'NO',
+    'DEAD_CODE_STRIPPING' => 'NO',
+    'DEPLOYMENT_POSTPROCESSING' => 'NO',
+    'COPY_PHASE_STRIP' => 'NO',
     'HEADER_SEARCH_PATHS' => '$(inherited) $(PODS_TARGET_SRCROOT)/third_party/sfizz/src $(PODS_ROOT)/flutter_sequencer/third_party/sfizz/src $(PODS_TARGET_SRCROOT)/Classes $(PODS_TARGET_SRCROOT)/Classes/AudioUnit/Sfizz',
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
     'CLANG_CXX_LIBRARY' => 'libc++',
     'OTHER_CPLUSPLUSFLAGS' => '$(inherited) -std=c++17',
     'CLANG_ENABLE_MODULES' => 'NO',
     'SWIFT_VERSION' => '5.0',
-    'SWIFT_COMPILATION_MODE' => 'wholemodule',
+    'SWIFT_COMPILATION_MODE' => 'singlefile',
+    'SWIFT_OPTIMIZATION_LEVEL' => '-Onone',
     'SWIFT_ENABLE_LIBRARY_EVOLUTION' => 'NO'
   }
   
@@ -51,7 +56,10 @@ Pod::Spec.new do |s|
     'OTHER_LDFLAGS' => '$(inherited) -framework AudioToolbox -framework AVFoundation -framework CoreAudio',
     'CLANG_ENABLE_MODULES' => 'NO',
     'SWIFT_ENABLE_LIBRARY_EVOLUTION' => 'NO',
-    'SWIFT_COMPILATION_MODE' => 'wholemodule'
+    'SWIFT_COMPILATION_MODE' => 'singlefile',
+    'STRIP_INSTALLED_PRODUCT' => 'NO',
+    'DEAD_CODE_STRIPPING' => 'NO',
+    'DEPLOYMENT_POSTPROCESSING' => 'NO'
   }
   
   s.swift_version = '5.0'

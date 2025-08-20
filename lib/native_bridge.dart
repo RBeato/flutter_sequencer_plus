@@ -163,6 +163,7 @@ class NativeBridge {
     }
   }
 
+
   static Future<int> addTrackSf2(String filename, bool isAsset, int patchNumber) async {
     _ensureInitialized();
     print('[DEBUG] NativeBridge: Adding SF2 track: $filename');
@@ -264,15 +265,25 @@ class NativeBridge {
     }
   }
 
-  static Future<int?> addTrackAudioUnit(String id) async {
-    if (Platform.isAndroid) return -1;
+  static Future<int> addTrackAudioUnit(String audioUnitId) async {
+    print('[DEBUG] NativeBridge: Adding AudioUnit track: $audioUnitId');
+    
+    if (Platform.isAndroid) {
+      print('[ERROR] AudioUnit not supported on Android');
+      return -1;
+    }
     
     try {
       const channel = MethodChannel('flutter_sequencer');
-      final result = await channel.invokeMethod('addTrackAudioUnit', {'id': id});
-      return result as int?;
+      final result = await channel.invokeMethod('addTrackAudioUnit', {
+        'audioUnitId': audioUnitId,
+      });
+      
+      final trackIndex = result as int? ?? -1;
+      print('[DEBUG] NativeBridge: AudioUnit track added: $audioUnitId -> $trackIndex');
+      return trackIndex;
     } catch (e) {
-      print('[ERROR] AudioUnit track creation failed: $e');
+      print('[ERROR] NativeBridge: Failed to add AudioUnit track: $audioUnitId - $e');
       return -1;
     }
   }

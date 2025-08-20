@@ -102,8 +102,8 @@ public class SwiftFlutterSequencerPlugin: NSObject, FlutterPlugin {
         } else if (call.method == "listAudioUnits") {
             listAudioUnits { result($0) }
         } else if (call.method == "addTrackAudioUnit") {
-            let audioUnitId = (call.arguments as AnyObject)["id"] as! String
-            addTrackAudioUnit(audioUnitId) { result($0) }
+            let audioUnitId = (call.arguments as AnyObject)["audioUnitId"] as! String
+            createAudioUnitTrack(audioUnitId) { result($0) }
         } else if (call.method == "initializeAudioSession") {
             initializeAudioSession(result)
         } else if (call.method == "getDebugLog") {
@@ -151,9 +151,52 @@ func listAudioUnits(completion: @escaping ([String]) -> Void) {
     }
 }
 
+// Called from method channel
+func createAudioUnitTrack(_ audioUnitId: String, completion: @escaping (Int) -> Void) {
+    NSLog("🎵 Method Channel: Adding AudioUnit track: \(audioUnitId)")
+    
+    // TEMPORARY SAFETY FIX: Skip AudioUnit creation on physical devices to prevent crashes
+    // This will help isolate if AudioUnit loading is causing the crashes
+    #if targetEnvironment(simulator)
+    NSLog("🎵 AudioUnit creation enabled on simulator")
+    
+    guard let engine = plugin.engine else {
+        print("[ERROR] Engine not available for AudioUnit track creation")
+        completion(-1)
+        return
+    }
+    
+    // Add timeout to prevent hanging
+    var hasCompleted = false
+    let completionQueue = DispatchQueue.main
+    
+    // Set a timeout for AudioUnit creation
+    completionQueue.asyncAfter(deadline: .now() + 5.0) {  // Reduced to 5 seconds for testing
+        if !hasCompleted {
+            NSLog("⏰ AudioUnit track creation timed out after 5 seconds")
+            hasCompleted = true
+            completion(-1)
+        }
+    }
+    
+    engine.addTrackAudioUnit(audioUnitId: audioUnitId) { trackIndex in
+        completionQueue.async {
+            if !hasCompleted {
+                hasCompleted = true
+                NSLog("🎵 Method Channel: AudioUnit track created with index: \(trackIndex)")
+                completion(Int(trackIndex))
+            }
+        }
+    }
+    #else
+    NSLog("🚫 AudioUnit creation disabled on physical device to prevent crashes")
+    NSLog("📱 Physical device detected - skipping AudioUnit for safety")
+    completion(-1)
+    #endif
+}
 
-@_cdecl("setup_engine")
-func setupEngine(sampleRateCallbackPort: Dart_Port) {
+
+@objc public func setupEngine(sampleRateCallbackPort: Dart_Port) {
     NSLog("🚨🚨🚨 NUCLEAR FFI: setup_engine called with port: \(sampleRateCallbackPort)")
     print("[DEBUG] ==> setup_engine called with port: \(sampleRateCallbackPort)")
     

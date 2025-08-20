@@ -443,20 +443,262 @@ public class CocoaEngine {
         }
     }
     
-    // Stub methods for compatibility - disabled to prevent crashes
     func addTrackSfz(sfzPath: UnsafePointer<CChar>, tuningPath: UnsafePointer<CChar>, completion: @escaping (track_index_t) -> Void) {
-        print("[DEBUG] SFZ tracks disabled in minimal mode")
-        completion(track_index_t(999)) // Use a safe error value
+        let sfzPathString = String(cString: sfzPath)
+        NSLog("🎵 HIGH-PERF: Adding SFZ track: \(sfzPathString)")
+        print("🎵 DIAGNOSTIC: Starting addTrackSfz for: \(sfzPathString)")
+        
+        // Create SfizzAU AudioUnit
+        let sfizzAUDescription = SfizzAU.componentDescription
+        
+        AudioUnitUtils.instantiate(
+            description: sfizzAUDescription,
+            sampleRate: Double(outputFormat.sampleRate),
+            options: [.loadOutOfProcess] // Performance optimization
+        ) { [weak self] (avAudioUnit: AVAudioUnit?) in
+            print("🔄 DIAGNOSTIC: SfizzAU instantiate callback called")
+            guard let self = self else {
+                print("❌ DIAGNOSTIC: Self is nil in SfizzAU instantiate callback")
+                completion(track_index_t(999))
+                return
+            }
+            
+            guard let avAudioUnit = avAudioUnit else {
+                print("❌ DIAGNOSTIC: SfizzAU instantiation failed - avAudioUnit is nil")
+                completion(track_index_t(999))
+                return
+            }
+            
+            print("✅ DIAGNOSTIC: SfizzAU instantiated successfully")
+            
+            // PERFORMANCE: Execute on main thread for immediate connection
+            DispatchQueue.main.async {
+                print("🔄 DIAGNOSTIC: Executing SFZ setup on main thread")
+                
+                // Cast to SfizzAU and load SFZ file
+                if let sfizzAU = avAudioUnit.auAudioUnit as? SfizzAU {
+                    print("✅ DIAGNOSTIC: Successfully cast to SfizzAU")
+                    
+                    // Load the SFZ file
+                    let loadResult = sfizzAU.loadSfzFile(path: sfzPath, tuningPath: tuningPath)
+                    
+                    if loadResult {
+                        print("✅ DIAGNOSTIC: SFZ file loaded successfully")
+                        
+                        let trackIndex = self.nextTrackIndex()
+                        print("🎯 DIAGNOSTIC: Created SFZ track index: \(trackIndex)")
+                        
+                        // CRITICAL: Connect immediately and register AudioUnit
+                        self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
+                        print("✅ DIAGNOSTIC: SfizzAU connected")
+                        
+                        self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
+                        print("✅ DIAGNOSTIC: SfizzAU registered with track \(trackIndex)")
+                        
+                        completion(trackIndex)
+                        print("🎉 DIAGNOSTIC: SFZ track creation completed successfully!")
+                    } else {
+                        print("❌ DIAGNOSTIC: Failed to load SFZ file: \(sfzPathString)")
+                        completion(track_index_t(999))
+                    }
+                } else {
+                    print("❌ DIAGNOSTIC: Failed to cast to SfizzAU")
+                    completion(track_index_t(999))
+                }
+            }
+        }
     }
     
     func addTrackSfzString(sampleRoot: UnsafePointer<CChar>, sfzString: UnsafePointer<CChar>, tuningString: UnsafePointer<CChar>, completion: @escaping (track_index_t) -> Void) {
-        print("[DEBUG] SFZ string tracks disabled in minimal mode")
-        completion(track_index_t(999)) // Use a safe error value
+        let sampleRootString = String(cString: sampleRoot)
+        NSLog("🎵 HIGH-PERF: Adding SFZ string track with sample root: \(sampleRootString)")
+        print("🎵 DIAGNOSTIC: Starting addTrackSfzString")
+        
+        // Create SfizzAU AudioUnit
+        let sfizzAUDescription = SfizzAU.componentDescription
+        
+        AudioUnitUtils.instantiate(
+            description: sfizzAUDescription,
+            sampleRate: Double(outputFormat.sampleRate),
+            options: [.loadOutOfProcess] // Performance optimization
+        ) { [weak self] (avAudioUnit: AVAudioUnit?) in
+            print("🔄 DIAGNOSTIC: SfizzAU string instantiate callback called")
+            guard let self = self else {
+                print("❌ DIAGNOSTIC: Self is nil in SfizzAU string instantiate callback")
+                completion(track_index_t(999))
+                return
+            }
+            
+            guard let avAudioUnit = avAudioUnit else {
+                print("❌ DIAGNOSTIC: SfizzAU string instantiation failed - avAudioUnit is nil")
+                completion(track_index_t(999))
+                return
+            }
+            
+            print("✅ DIAGNOSTIC: SfizzAU string instantiated successfully")
+            
+            // PERFORMANCE: Execute on main thread for immediate connection
+            DispatchQueue.main.async {
+                print("🔄 DIAGNOSTIC: Executing SFZ string setup on main thread")
+                
+                // Cast to SfizzAU and load SFZ string
+                if let sfizzAU = avAudioUnit.auAudioUnit as? SfizzAU {
+                    print("✅ DIAGNOSTIC: Successfully cast to SfizzAU for string loading")
+                    
+                    // Load the SFZ string
+                    let loadResult = sfizzAU.loadSfzString(sampleRoot: sampleRoot, sfzString: sfzString, tuningString: tuningString)
+                    
+                    if loadResult {
+                        print("✅ DIAGNOSTIC: SFZ string loaded successfully")
+                        
+                        let trackIndex = self.nextTrackIndex()
+                        print("🎯 DIAGNOSTIC: Created SFZ string track index: \(trackIndex)")
+                        
+                        // CRITICAL: Connect immediately and register AudioUnit
+                        self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
+                        print("✅ DIAGNOSTIC: SfizzAU string connected")
+                        
+                        self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
+                        print("✅ DIAGNOSTIC: SfizzAU string registered with track \(trackIndex)")
+                        
+                        completion(trackIndex)
+                        print("🎉 DIAGNOSTIC: SFZ string track creation completed successfully!")
+                    } else {
+                        print("❌ DIAGNOSTIC: Failed to load SFZ string")
+                        completion(track_index_t(999))
+                    }
+                } else {
+                    print("❌ DIAGNOSTIC: Failed to cast to SfizzAU for string loading")
+                    completion(track_index_t(999))
+                }
+            }
+        }
     }
     
     func addTrackAudioUnit(audioUnitId: String, completion: @escaping (track_index_t) -> Void) {
-        print("[DEBUG] AudioUnit tracks disabled in minimal mode")
-        completion(track_index_t(999)) // Use a safe error value
+        NSLog("🎵 HIGH-PERF: Adding AudioUnit track: \(audioUnitId)")
+        print("🎵 DIAGNOSTIC: Starting addTrackAudioUnit for: \(audioUnitId)")
+        
+        // Parse audioUnitId (format: "manufacturer.component" or just look for Apple DLS)
+        let isAppleDLS = audioUnitId.contains("Apple") || audioUnitId.contains("DLS") || audioUnitId.contains("dls")
+        
+        AudioUnitUtils.loadAudioUnits { [weak self] avAudioUnitComponents in
+            guard let self = self else { 
+                print("❌ DIAGNOSTIC: Self is nil in AudioUnit loadAudioUnits callback")
+                completion(track_index_t(999))
+                return 
+            }
+            
+            print("🔍 DIAGNOSTIC: Loaded \(avAudioUnitComponents.count) AudioUnit components")
+            
+            // Look for Apple DLS Music Device specifically
+            let targetComponent: AVAudioUnitComponent?
+            
+            if isAppleDLS {
+                // Find Apple's DLS Music Device (built-in GM synthesizer)
+                targetComponent = avAudioUnitComponents.first { component in
+                    let desc = component.audioComponentDescription
+                    return desc.componentManufacturer == kAudioUnitManufacturer_Apple &&
+                           desc.componentType == kAudioUnitType_MusicDevice &&
+                           desc.componentSubType == kAudioUnitSubType_MIDISynth
+                }
+            } else {
+                // For other AudioUnits, try to find by name matching
+                targetComponent = avAudioUnitComponents.first { component in
+                    component.name.lowercased().contains(audioUnitId.lowercased()) ||
+                    component.manufacturerName.lowercased().contains(audioUnitId.lowercased())
+                }
+            }
+            
+            if let audioUnitComponent = targetComponent {
+                print("✅ DIAGNOSTIC: Found AudioUnit component: \(audioUnitComponent.name) by \(audioUnitComponent.manufacturerName)")
+                
+                AudioUnitUtils.instantiate(
+                    description: audioUnitComponent.audioComponentDescription,
+                    sampleRate: Double(self.outputFormat.sampleRate),
+                    options: [.loadOutOfProcess] // Performance optimization
+                ) { [weak self] (avAudioUnit: AVAudioUnit?) in
+                    print("🔄 DIAGNOSTIC: AudioUnit instantiate callback called")
+                    guard let self = self else {
+                        print("❌ DIAGNOSTIC: Self is nil in AudioUnit instantiate callback")
+                        completion(track_index_t(999))
+                        return
+                    }
+                    
+                    guard let avAudioUnit = avAudioUnit else {
+                        print("❌ DIAGNOSTIC: AudioUnit instantiation failed - avAudioUnit is nil")
+                        completion(track_index_t(999))
+                        return
+                    }
+                    
+                    print("✅ DIAGNOSTIC: AudioUnit instantiated successfully")
+                    
+                    // PERFORMANCE: Execute on main thread for immediate connection
+                    DispatchQueue.main.async {
+                        print("🔄 DIAGNOSTIC: Executing AudioUnit setup on main thread")
+                        
+                        let trackIndex = self.nextTrackIndex()
+                        print("🎯 DIAGNOSTIC: Created AudioUnit track index: \(trackIndex)")
+                        
+                        // CRITICAL: Connect immediately and register AudioUnit
+                        self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
+                        print("✅ DIAGNOSTIC: AudioUnit connected")
+                        
+                        self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
+                        print("✅ DIAGNOSTIC: AudioUnit registered with track \(trackIndex)")
+                        
+                        completion(trackIndex)
+                        print("🎉 DIAGNOSTIC: AudioUnit track creation completed successfully!")
+                    }
+                }
+            } else {
+                print("❌ DIAGNOSTIC: AudioUnit component not found for ID: \(audioUnitId)")
+                print("🔍 Available AudioUnits (\(avAudioUnitComponents.count) found):")
+                for component in avAudioUnitComponents {
+                    let desc = component.audioComponentDescription
+                    print("   - \(component.name) by \(component.manufacturerName)")
+                    print("     Type: \(desc.componentType), Subtype: \(desc.componentSubType), Manufacturer: \(desc.componentManufacturer)")
+                }
+                
+                // Try to find ANY available music device AudioUnit as fallback
+                let fallbackComponent = avAudioUnitComponents.first { component in
+                    let desc = component.audioComponentDescription
+                    return desc.componentType == kAudioUnitType_MusicDevice
+                }
+                
+                if let fallback = fallbackComponent {
+                    print("🔄 DIAGNOSTIC: Trying fallback AudioUnit: \(fallback.name)")
+                    
+                    AudioUnitUtils.instantiate(
+                        description: fallback.audioComponentDescription,
+                        sampleRate: Double(self.outputFormat.sampleRate),
+                        options: [.loadOutOfProcess]
+                    ) { [weak self] (avAudioUnit: AVAudioUnit?) in
+                        guard let self = self else {
+                            completion(track_index_t(999))
+                            return
+                        }
+                        
+                        guard let avAudioUnit = avAudioUnit else {
+                            print("❌ DIAGNOSTIC: Fallback AudioUnit instantiation failed")
+                            completion(track_index_t(999))
+                            return
+                        }
+                        
+                        DispatchQueue.main.async {
+                            let trackIndex = self.nextTrackIndex()
+                            self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
+                            self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
+                            print("✅ DIAGNOSTIC: Fallback AudioUnit connected: \(fallback.name)")
+                            completion(trackIndex)
+                        }
+                    }
+                } else {
+                    print("❌ DIAGNOSTIC: No suitable AudioUnit found (no music devices available)")
+                    completion(track_index_t(999))
+                }
+            }
+        }
     }
     
     func removeTrack(trackIndex: track_index_t) -> Bool {

@@ -125,14 +125,13 @@ cd cpp_test && cmake . && make && ./build/sequencer_test  # C++ tests (if availa
 
 ### ✅ **Production Ready Features**
 - **Cross-platform audio synthesis** (Android, iOS, macOS)
-- **Professional SF2/SFZ playback** with parameter control
+- **Professional SF2/SFZ playback** with parameter control (including full SFZ support on iOS via sfizz)
 - **Real-time MIDI sequencing** with frame-accurate timing
 - **Multi-track recording/playback** with volume automation
 - **Loop support** with seamless transitions
 - **Performance optimized** for mobile devices
 
 ### 🔄 **Current Limitations**
-- **No SFZ support on iOS** (only SF2 and AudioUnit)
 - **Limited audio effects** (basic volume/pan only)
 - **No real-time audio analysis** (FFT, waveform visualization)
 - **No streaming audio** (large samples must fit in RAM)
