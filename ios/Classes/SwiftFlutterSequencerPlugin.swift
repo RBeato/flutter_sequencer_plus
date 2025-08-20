@@ -196,7 +196,8 @@ func createAudioUnitTrack(_ audioUnitId: String, completion: @escaping (Int) -> 
 }
 
 
-@objc public func setupEngine(sampleRateCallbackPort: Dart_Port) {
+@_cdecl("setup_engine")
+func setupEngine(sampleRateCallbackPort: Dart_Port) {
     NSLog("🚨🚨🚨 NUCLEAR FFI: setup_engine called with port: \(sampleRateCallbackPort)")
     print("[DEBUG] ==> setup_engine called with port: \(sampleRateCallbackPort)")
     
