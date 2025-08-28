@@ -262,9 +262,11 @@ __attribute__((visibility("default"))) __attribute__((used))
     __attribute__((visibility("default"))) __attribute__((used))
     void engine_play() {
         if (!check_engine()) {
+            LOGE("engine_play: Engine not initialized");
             return;
         }
 
+        LOGI("engine_play: Starting audio engine playback");
         engine->play();
     }
 
@@ -275,5 +277,12 @@ __attribute__((visibility("default"))) __attribute__((used))
         }
 
         engine->pause();
+    }
+
+    __attribute__((visibility("default"))) __attribute__((used))
+    void initializeAudioSession() {
+        // Initialize audio session for Android
+        // This is a placeholder that can be expanded with specific Android audio configuration
+        LOGI("Audio session initialized for Android");
     }
 }

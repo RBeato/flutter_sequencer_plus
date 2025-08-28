@@ -380,6 +380,60 @@ class NativeBridge {
     engineStop();
   }
 
+  /// Performance optimization: Cache for expensive frame calculations
+  static final Map<String, int> _frameCache = <String, int>{};
+  static int _lastCacheFrame = -1;
+
+  /// Optimized frame calculation with platform-specific caching
+  static int getOptimizedFrame(double beat, double tempo, int sampleRate) {
+    // ANDROID FIX: Use less aggressive caching on Android to prevent timing issues
+    final useCache = Platform.isIOS || Platform.isMacOS;
+    
+    if (useCache) {
+      // Create cache key for this calculation
+      final cacheKey = '${beat.toStringAsFixed(2)}_${tempo.toStringAsFixed(1)}_$sampleRate';
+      
+      // Check if we have a recent cached result
+      if (_frameCache.containsKey(cacheKey)) {
+        return _frameCache[cacheKey]!;
+      }
+      
+      // Calculate and cache result
+      final us = ((1 / tempo) * beat * 60000000).round();
+      final frames = (us * sampleRate / 1000000.0).round();
+      
+      // Cache the result with cleanup if cache gets too large
+      if (_frameCache.length > 50) { // Smaller cache for stability
+        _frameCache.clear();
+      }
+      _frameCache[cacheKey] = frames;
+      
+      return frames;
+    } else {
+      // Android: Always calculate fresh to avoid timing issues
+      final us = ((1 / tempo) * beat * 60000000).round();
+      return (us * sampleRate / 1000000.0).round();
+    }
+  }
+
+  /// Optimized loop position calculation to reduce CPU overhead during playback
+  static double getOptimizedLoopPosition(double currentBeat, double loopStartBeat, double loopEndBeat) {
+    if (loopEndBeat <= loopStartBeat) return currentBeat;
+    
+    final loopLength = loopEndBeat - loopStartBeat;
+    if (currentBeat < loopStartBeat) return currentBeat;
+    
+    // Optimized modulo calculation
+    final relativePosition = currentBeat - loopStartBeat;
+    return (relativePosition % loopLength) + loopStartBeat;
+  }
+
+  /// Clear performance caches when needed
+  static void clearPerformanceCaches() {
+    _frameCache.clear();
+    _lastCacheFrame = -1;
+  }
+
   static _SerializedEventData _serializeEvents(List<SchedulerEvent> events,
       int sampleRate, double tempo) {
     final eventCount = events.length;

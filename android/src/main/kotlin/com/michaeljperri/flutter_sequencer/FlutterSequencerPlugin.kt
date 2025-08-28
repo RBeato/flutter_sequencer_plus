@@ -50,6 +50,13 @@ class FlutterSequencerPlugin : FlutterPlugin, MethodCallHandler {
             }
         } else if (call.method == "listAudioUnits") {
             result.success(emptyList<String>())
+        } else if (call.method == "initializeAudioSession") {
+            try {
+                initializeAudioSession()
+                result.success(null)
+            } catch (e: Exception) {
+                result.error("INIT_ERROR", "Failed to initialize audio session: ${e.message}", null)
+            }
         } else {
             result.notImplemented()
         }
@@ -102,4 +109,5 @@ class FlutterSequencerPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     private external fun setupAssetManager(assetManager: AssetManager)
+    private external fun initializeAudioSession()
 }

@@ -346,8 +346,9 @@ class Track {
     events.clear();
   }
 
-  /// Syncs events to the backend. This should be called after making changes to
-  /// track events to ensure that the changes are synced immediately.
+  /// Syncs events to the backend with optimized performance for loops.
+  /// This should be called after making changes to track events to ensure 
+  /// that the changes are synced immediately.
   void syncBuffer(
       [int? absoluteStartFrame, int maxEventsToSync = BUFFER_SIZE]) {
     final position = NativeBridge.getPosition();
@@ -358,11 +359,20 @@ class Track {
       absoluteStartFrame = max(absoluteStartFrame, position);
     }
 
-    NativeBridge.clearEvents(id, absoluteStartFrame);
+    // OPTIMIZED: Platform-specific clearing strategy
+    // Android needs more frequent clearing to prevent note accumulation
+    final positionDiff = (absoluteStartFrame - lastFrameSynced).abs();
+    final shouldClear = Platform.isAndroid 
+        ? positionDiff > 10  // More frequent clearing on Android
+        : positionDiff > 100; // Less frequent on iOS/macOS for performance
+        
+    if (shouldClear) {
+      NativeBridge.clearEvents(id, absoluteStartFrame);
+    }
 
     if (sequence.isPlaying) {
       final relativeStartFrame = absoluteStartFrame - sequence.engineStartFrame;
-      _scheduleEvents(relativeStartFrame, maxEventsToSync);
+      _scheduleEventsOptimized(relativeStartFrame, maxEventsToSync);
     } else {
       lastFrameSynced = 0;
     }
@@ -406,54 +416,71 @@ class Track {
     events.insert(index, eventToAdd);
   }
 
-  /// Builds events that can be scheduled in the sequencer engine's event buffer
-  /// and adds them to eventsList.
-  void _scheduleEvents(int startFrame, [int maxEventsToSync = BUFFER_SIZE]) {
+  /// Optimized version of _scheduleEvents with reduced loop overhead
+  void _scheduleEventsOptimized(int startFrame, [int maxEventsToSync = BUFFER_SIZE]) {
     final isBeforeLoopEnd = sequence.loopState == LoopState.BeforeLoopEnd;
-    final loopLength = sequence.getLoopLengthFrames();
-    final loopsElapsed = sequence.loopState == LoopState.Off
-        ? 0
-        : sequence.getLoopsElapsed(startFrame);
+    
+    if (!isBeforeLoopEnd) {
+      // Simple case: no looping, use optimized path
+      _scheduleEventsInRangeOptimized(
+          maxEventsToSync,
+          startFrame,
+          sequence.beatToFrames(sequence.endBeat),
+          0);
+      return;
+    }
 
-    var eventsSyncedCount = _scheduleEventsInRange(
+    // Loop case: pre-calculate values to reduce repeated calculations
+    final loopLength = sequence.getLoopLengthFrames();
+    final loopsElapsed = sequence.getLoopsElapsed(startFrame);
+    final loopStartFrame = sequence.beatToFrames(sequence.loopStartBeat);
+    final loopEndFrame = sequence.beatToFrames(sequence.loopEndBeat);
+
+    var eventsSyncedCount = _scheduleEventsInRangeOptimized(
         maxEventsToSync,
-        isBeforeLoopEnd ? sequence.getLoopedFrame(startFrame) : startFrame,
-        sequence.beatToFrames(
-            isBeforeLoopEnd ? sequence.loopEndBeat : sequence.endBeat),
+        sequence.getLoopedFrame(startFrame),
+        loopEndFrame,
         loopLength * loopsElapsed);
 
-    if (isBeforeLoopEnd) {
-      var loopIndex = loopsElapsed + 1;
-      var lastBatchCount = 0;
-      final loopStartFrame = sequence.beatToFrames(sequence.loopStartBeat);
-      final loopEndFrame = sequence.beatToFrames(sequence.loopEndBeat);
+    // OPTIMIZED: Limit loop iterations to prevent performance issues
+    var loopIndex = loopsElapsed + 1;
+    var lastBatchCount = 0;
+    var maxLoopIterations = 10; // Safety limit to prevent infinite loops
 
-      while (eventsSyncedCount < maxEventsToSync) {
-        // Schedule all events in one loop range
-        lastBatchCount = _scheduleEventsInRange(
-            maxEventsToSync - eventsSyncedCount,
-            loopStartFrame,
-            loopEndFrame,
-            loopLength * loopIndex);
+    while (eventsSyncedCount < maxEventsToSync && maxLoopIterations > 0) {
+      lastBatchCount = _scheduleEventsInRangeOptimized(
+          maxEventsToSync - eventsSyncedCount,
+          loopStartFrame,
+          loopEndFrame,
+          loopLength * loopIndex);
 
-        eventsSyncedCount += lastBatchCount;
-        if (lastBatchCount == 0) break;
-        loopIndex++;
-      }
+      eventsSyncedCount += lastBatchCount;
+      if (lastBatchCount == 0) break;
+      loopIndex++;
+      maxLoopIterations--;
     }
   }
+  
+  /// Legacy method redirected to optimized version
+  void _scheduleEvents(int startFrame, [int maxEventsToSync = BUFFER_SIZE]) {
+    _scheduleEventsOptimized(startFrame, maxEventsToSync);
+  }
 
-  /// Schedules this track's events that start on or after startBeat and end
-  /// on or before endBeat. Adds frameOffset to every scheduled event.
-  int _scheduleEventsInRange(
+  /// Optimized event scheduling with reduced frame calculations
+  int _scheduleEventsInRangeOptimized(
       int maxEventsToSync, int startFrame, int? endFrame, int frameOffset) {
     final eventsToSync = <SchedulerEvent>[];
+    final sampleRate = Sequence.globalState.sampleRate!;
+    final tempo = sequence.tempo;
 
+    // OPTIMIZED: Pre-filter events to reduce beatToFrames calls
     for (var eventIndex = 0; eventIndex < events.length; eventIndex++) {
-      if (eventsToSync.length == maxEventsToSync) break;
+      if (eventsToSync.length >= maxEventsToSync) break;
 
       final event = events[eventIndex];
-      final eventFrame = sequence.beatToFrames(event.beat);
+      
+      // OPTIMIZED: Use cached frame calculation when possible
+      final eventFrame = NativeBridge.getOptimizedFrame(event.beat, tempo, sampleRate);
 
       if (eventFrame < startFrame) continue;
       if (endFrame != null && eventFrame > endFrame) break;
@@ -461,20 +488,30 @@ class Track {
       eventsToSync.add(event);
     }
 
+    if (eventsToSync.isEmpty) {
+      return 0;
+    }
+
     final eventsSyncedCount = NativeBridge.scheduleEvents(
         id,
         eventsToSync,
-        Sequence.globalState.sampleRate!,
-        sequence.tempo,
+        sampleRate,
+        tempo,
         sequence.engineStartFrame + frameOffset);
 
     if (eventsSyncedCount > 0) {
-      lastFrameSynced = sequence.engineStartFrame +
-          sequence.beatToFrames(eventsToSync[eventsSyncedCount - 1].beat) +
-          frameOffset;
+      final lastEvent = eventsToSync[eventsSyncedCount - 1];
+      final lastEventFrame = NativeBridge.getOptimizedFrame(lastEvent.beat, tempo, sampleRate);
+      lastFrameSynced = sequence.engineStartFrame + lastEventFrame + frameOffset;
     }
 
     return eventsSyncedCount;
+  }
+  
+  /// Legacy method redirected to optimized version  
+  int _scheduleEventsInRange(
+      int maxEventsToSync, int startFrame, int? endFrame, int frameOffset) {
+    return _scheduleEventsInRangeOptimized(maxEventsToSync, startFrame, endFrame, frameOffset);
   }
 
   /// Used for ordering events.

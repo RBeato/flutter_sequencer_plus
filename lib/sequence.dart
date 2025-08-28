@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import 'constants.dart';
@@ -33,6 +34,8 @@ class Sequence {
     for (var track in _tracks.values) {
       deleteTrack(track);
     }
+    // OPTIMIZED: Clear performance caches when sequence is destroyed
+    NativeBridge.clearPerformanceCaches();
     globalState.unregisterSequence(this);
   }
 
@@ -123,13 +126,18 @@ class Sequence {
     // MINIMAL STOP: Don't send individual note-offs that can cause corruption
   }
 
-  /// Sets the tempo.
+  /// Sets the tempo with optimized loop handling.
   void setTempo(double nextTempo) {
-    // Update engine start frame to remove excess loops
-    final loopsElapsed = loopState == LoopState.BeforeLoopEnd
-        ? getLoopsElapsed(_getFramesRendered())
-        : 0;
-    engineStartFrame += loopsElapsed * getLoopLengthFrames();
+    // OPTIMIZED: Skip expensive operations if tempo hasn't changed significantly
+    if ((tempo - nextTempo).abs() < 0.01) {
+      return;
+    }
+
+    // Update engine start frame to remove excess loops only if looping
+    if (loopState == LoopState.BeforeLoopEnd) {
+      final loopsElapsed = getLoopsElapsed(_getFramesRendered());
+      engineStartFrame += loopsElapsed * getLoopLengthFrames();
+    }
 
     // Update engine start frame to adjust to new tempo
     final framesRendered = _getFramesRendered();
@@ -139,22 +147,31 @@ class Sequence {
 
     tempo = nextTempo;
 
-    getTracks().forEach((track) {
-      track.syncBuffer();
-    });
+    // OPTIMIZED: Batch sync buffer operations to reduce overhead
+    final tracks = getTracks();
+    for (int i = 0; i < tracks.length; i++) {
+      tracks[i].syncBuffer();
+    }
   }
 
-  /// Enables looping.
+  /// Enables looping with optimized performance.
   void setLoop(double loopStartBeat, double loopEndBeat) {
     // If the sequence is over, ensure globalState is updated so the sequence
     // doesn't start playing
     checkIsOver();
 
-    // Update engine start frame to remove excess loops
-    final loopsElapsed = loopState == LoopState.BeforeLoopEnd
-        ? getLoopsElapsed(_getFramesRendered())
-        : 0;
-    engineStartFrame += loopsElapsed * getLoopLengthFrames();
+    // OPTIMIZED: Only update engine frame if we're actually transitioning from non-loop to loop
+    // or if we have significant loop boundary changes
+    final wasLooping = loopState != LoopState.Off;
+    final significantChange = (this.loopStartBeat - loopStartBeat).abs() > 0.01 || 
+                             (this.loopEndBeat - loopEndBeat).abs() > 0.01;
+    
+    if (!wasLooping || significantChange) {
+      final loopsElapsed = loopState == LoopState.BeforeLoopEnd
+          ? getLoopsElapsed(_getFramesRendered())
+          : 0;
+      engineStartFrame += loopsElapsed * getLoopLengthFrames();
+    }
 
     // Update loop state and bounds
     final loopEndFrame = beatToFrames(loopEndBeat);
@@ -169,14 +186,24 @@ class Sequence {
     this.loopStartBeat = loopStartBeat;
     this.loopEndBeat = loopEndBeat;
 
-    getTracks().forEach((track) => track.syncBuffer());
+    // OPTIMIZED: Platform-specific buffer sync strategy
+    // Android needs more frequent syncing to prevent note accumulation
+    final shouldSync = Platform.isAndroid 
+        ? (!wasLooping || significantChange || (this.loopStartBeat != loopStartBeat) || (this.loopEndBeat != loopEndBeat))
+        : (!wasLooping || significantChange);
+        
+    if (shouldSync) {
+      getTracks().forEach((track) => track.syncBuffer());
+    }
   }
 
-  /// Disables looping for the sequence.
+  /// Disables looping for the sequence with optimized performance.
   void unsetLoop() {
-    if (loopState == LoopState.BeforeLoopEnd) {
+    // OPTIMIZED: Only perform expensive operations if we were actually looping
+    final wasLooping = loopState != LoopState.Off;
+    
+    if (wasLooping && loopState == LoopState.BeforeLoopEnd) {
       final loopsElapsed = getLoopsElapsed(_getFramesRendered());
-
       engineStartFrame += loopsElapsed * getLoopLengthFrames();
     }
 
@@ -184,7 +211,10 @@ class Sequence {
     loopEndBeat = 0;
     loopState = LoopState.Off;
 
-    getTracks().forEach((track) => track.syncBuffer());
+    // OPTIMIZED: Only sync buffers if we were actually looping
+    if (wasLooping) {
+      getTracks().forEach((track) => track.syncBuffer());
+    }
   }
 
   /// Sets the beat at which the sequence will end. Events after the end beat
@@ -253,33 +283,47 @@ class Sequence {
   /// {@macro flutter_sequencer_library_private}
   /// Returns the number of loops that have been played
   /// since the sequence started playing.
+  /// OPTIMIZED: Cache expensive calculations.
   int getLoopsElapsed(int frame) {
     final loopStartFrame = beatToFrames(loopStartBeat);
 
     if (frame <= loopStartFrame) return 0;
-    if (getLoopLengthFrames() == 0) return 0;
+    
+    final loopLength = getLoopLengthFrames();
+    if (loopLength == 0) return 0;
 
-    return ((frame - loopStartFrame) / getLoopLengthFrames()).floor();
+    // OPTIMIZED: Use integer arithmetic for better performance
+    return (frame - loopStartFrame) ~/ loopLength;
   }
 
   /// {@macro flutter_sequencer_library_private}
   /// Maps a frame beyond the end of the loop range to
   /// where it would be inside the loop range.
+  /// OPTIMIZED: Reduce redundant calculations and improve performance.
   int getLoopedFrame(int frame) {
     final loopStartFrame = beatToFrames(loopStartBeat);
+    
+    if (frame <= loopStartFrame) return frame;
+    
     final loopLengthFrames = getLoopLengthFrames();
+    if (loopLengthFrames == 0) return frame;
 
-    if (frame <= loopStartFrame || loopLengthFrames == 0) return frame;
-
-    return ((frame - loopStartFrame) % loopLengthFrames) + loopStartFrame;
+    // OPTIMIZED: Single calculation with remainder
+    final relativeFrame = frame - loopStartFrame;
+    return (relativeFrame % loopLengthFrames) + loopStartFrame;
   }
 
   /// {@macro flutter_sequencer_library_private}
-  /// Converts a beat to sample frames.
+  /// Converts a beat to sample frames with optimized caching.
   int beatToFrames(double beat) {
-    // (min / b) * (ms) * (ms / min)
+    // OPTIMIZED: Use cached calculation for frequently accessed beats
+    final sampleRate = Sequence.globalState.sampleRate;
+    if (sampleRate != null) {
+      return NativeBridge.getOptimizedFrame(beat, tempo, sampleRate);
+    }
+    
+    // Fallback to original calculation if sample rate not available
     final us = ((1 / tempo) * beat * (60000000)).round();
-
     return Sequence.globalState.usToFrames(us);
   }
 

@@ -9,6 +9,9 @@
 
 #include "./Logging.h"
 
+// Forward declaration
+extern "C" void initializeAudioSession();
+
 AAssetManager *assetManager;
 
 std::string appendToAssetDir(const char* path) {
@@ -35,6 +38,13 @@ void JNICALL Java_com_michaeljperri_flutter_1sequencer_FlutterSequencerPlugin_se
     }
 
     LOGI("Successfully set asset manager in native module");
+}
+
+extern "C" __attribute__((visibility("default"))) __attribute__((used))
+void JNICALL Java_com_michaeljperri_flutter_1sequencer_FlutterSequencerPlugin_initializeAudioSession(
+    JNIEnv *env, jobject instance) {
+    
+    initializeAudioSession();
 }
 
 #endif //ASSET_MANAGER_H

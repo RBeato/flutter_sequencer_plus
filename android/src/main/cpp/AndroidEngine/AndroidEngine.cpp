@@ -94,23 +94,30 @@ int32_t AndroidEngine::getBufferSize() {
 }
 
 void AndroidEngine::play() {
+    LOGI("AndroidEngine::play() called - starting audio");
     mSchedulerMixer.play();
     
     if (!mIsPlaying.load()) {
         mIsPlaying.store(true);
         
         if (mPlayerPlay != nullptr) {
+            LOGI("Starting OpenSL ES player");
             // Start OpenSL ES player
             SLresult result = (*mPlayerPlay)->SetPlayState(mPlayerPlay, SL_PLAYSTATE_PLAYING);
             if (SL_RESULT_SUCCESS != result) {
-                LOGE("Failed to start OpenSL ES player");
+                LOGE("Failed to start OpenSL ES player, result: %d", result);
+            } else {
+                LOGI("OpenSL ES player started successfully");
             }
         } else {
+            LOGI("Starting fallback audio thread");
             // Fallback to simulation thread
             mAudioThread = std::thread(&AndroidEngine::audioThreadFunc, this);
         }
         
-        LOGI("Audio playback started");
+        LOGI("Audio playback started - mIsPlaying: true");
+    } else {
+        LOGI("Audio already playing, skipping play() call");
     }
 }
 
@@ -311,6 +318,12 @@ void AndroidEngine::playerCallback(SLAndroidSimpleBufferQueueItf bq, void* conte
     
     // Only render audio if playing, otherwise send silence
     if (engine->mIsPlaying.load(std::memory_order_relaxed)) {
+        // Debug: Log audio callback occasionally 
+        static int callbackCount = 0;
+        if (++callbackCount % 1000 == 0) {
+            LOGI("Audio callback active - rendering frame %d", callbackCount);
+        }
+        
         try {
             // Render audio through the mixer to float buffer
             engine->mSchedulerMixer.renderAudio(floatBuffer, kBufferSizeFrames);
