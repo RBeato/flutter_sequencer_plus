@@ -610,8 +610,11 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
 
   handleSetLoop(bool nextIsLooping) {
     if (nextIsLooping) {
+      // OPTIMIZED: Loop performance improvements in v1.0.0+
+      // setLoop now has reduced overhead during loop transitions
       sequence.setLoop(0, stepCount.toDouble());
     } else {
+      // OPTIMIZED: unsetLoop only syncs buffers when necessary
       sequence.unsetLoop();
     }
 
