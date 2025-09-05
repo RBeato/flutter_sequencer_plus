@@ -136,6 +136,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   DateTime? _playbackStartTime;
   double _playbackStartBeat = 0.0;
   double _pausedAtBeat = 0.0;
+  double? _lastRawBeat; // Track last raw beat for loop boundary detection
   
   // Available sound instruments (SF2 + SFZ + AudioUnit)
   final List<Map<String, String>> _availableSoundFonts = [
@@ -467,55 +468,100 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   void _processPlayback() {
     if (_playbackStartTime == null) return;
     
-    // Calculate current beat based on elapsed time
-    final elapsed = DateTime.now().difference(_playbackStartTime!);
-    final elapsedBeats = (elapsed.inMicroseconds / 1000000.0) * (tempo / 60.0);
-    final currentBeat = _playbackStartBeat + elapsedBeats;
+    // HIGH-PRECISION timing: Use double precision throughout for better accuracy
+    final now = DateTime.now();
+    final elapsed = now.difference(_playbackStartTime!);
+    
+    // More precise calculation using double arithmetic
+    final elapsedSeconds = elapsed.inMicroseconds / 1000000.0;
+    final beatsPerSecond = tempo / 60.0;
+    final rawCurrentBeat = _playbackStartBeat + (elapsedSeconds * beatsPerSecond);
+    
+    // Handle looping with seamless modulo to prevent timing resets
+    final currentBeat = isLooping && rawCurrentBeat >= stepCount 
+        ? rawCurrentBeat % stepCount  // Seamless loop timing
+        : rawCurrentBeat;
     
     // Update position
     setState(() {
       position = currentBeat;
     });
     
-    // Check if we've reached the end
-    if (currentBeat >= stepCount) {
+    // Check if we've reached the end (only for non-looping mode)
+    if (!isLooping && currentBeat >= stepCount) {
       print('[DEBUG] Reached end: currentBeat=$currentBeat stepCount=$stepCount isLooping=$isLooping');
-      if (isLooping) {
-        print('[DEBUG] Looping back to beginning...');
-        // Loop back to beginning
-        _playbackStartTime = DateTime.now();
-        _playbackStartBeat = 0.0;
-        setState(() {
-          position = 0.0;
-        });
-        // Clear processed events when looping
-        _processedEvents.clear();
-      } else {
-        print('[DEBUG] Stopping playback (loop is OFF)...');
-        // Stop playback and reset everything to beginning
-        _stopSimplePlayback();
-        
-        // Clear all timing state to ensure clean restart
-        _processedEvents.clear();
-        _playbackStartTime = null;
-        _playbackStartBeat = 0.0;
-        _pausedAtBeat = 0.0;
-        
-        setState(() {
-          isPlaying = false;
-          position = 0.0;
-          isPaused = false;
-        });
-        
-        // Sync all tracks to pick up changes made during playback
-        tracks.forEach(syncTrack);
-        print('[DEBUG] Single playback ended: isPlaying=false, position=0.0, all timing cleared');
-        return;
-      }
+      print('[DEBUG] Stopping playback (loop is OFF)...');
+      // Stop playback and reset everything to beginning
+      _stopSimplePlayback();
+      
+      // Clear all timing state to ensure clean restart
+      _processedEvents.clear();
+      _playbackStartTime = null;
+      _playbackStartBeat = 0.0;
+      _pausedAtBeat = 0.0;
+      
+      setState(() {
+        isPlaying = false;
+        position = 0.0;
+        isPaused = false;
+      });
+      
+      // Sync all tracks to pick up changes made during playback
+      tracks.forEach(syncTrack);
+      print('[DEBUG] Single playback ended: isPlaying=false, position=0.0, all timing cleared');
+      return;
     }
     
     // Process events for current beat
     _processEventsAtBeat(currentBeat);
+    
+    // LOOP EVENT RESET: Clear processed events only at actual loop boundaries
+    if (isLooping) {
+      // Track loop count to detect actual boundary crossings
+      final currentLoopCount = (rawCurrentBeat / stepCount).floor();
+      
+      if (_lastRawBeat != null) {
+        final lastLoopCount = (_lastRawBeat! / stepCount).floor();
+        
+        // Only clear when we detect a new loop cycle (loop count increased)
+        if (currentLoopCount > lastLoopCount) {
+          final eventsCleared = _processedEvents.length;
+          
+          // Send note-offs for all active tracks to prevent sustain issues
+          for (final track in tracks) {
+            for (int note = 21; note <= 108; note++) { // Piano range
+              track.stopNoteNow(noteNumber: note);
+            }
+          }
+          
+          _processedEvents.clear();
+          print('[DEBUG] 🔄 Loop boundary: loop $lastLoopCount -> $currentLoopCount, cleared $eventsCleared events');
+        }
+      }
+      _lastRawBeat = rawCurrentBeat;
+    } else {
+      _lastRawBeat = null; // Reset when not looping
+    }
+    
+    // SMART EVENT CLEANUP for memory management
+    if (_processedEvents.length > 300) {
+      // Keep only recent events (within current beat vicinity)
+      final cutoffBeat = (currentBeat - 2.0) * 100; // 2 beats ago
+      
+      final oldSize = _processedEvents.length;
+      _processedEvents.removeWhere((key) {
+        final parts = key.split('-');
+        if (parts.length >= 2) {
+          final eventBeatScaled = int.tryParse(parts[1]) ?? 0;
+          return eventBeatScaled < cutoffBeat;
+        }
+        return false;
+      });
+      
+      if ((oldSize - _processedEvents.length) > 50) {
+        print('[DEBUG] 🧹 Memory cleanup: ${oldSize - _processedEvents.length} old events cleared');
+      }
+    }
   }
   
   Set<String> _processedEvents = {}; // Track which events we've already processed
