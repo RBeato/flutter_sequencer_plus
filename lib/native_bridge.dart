@@ -158,7 +158,6 @@ class NativeBridge {
       final result = await channel.invokeMethod('listAudioUnits');
       return (result as List<dynamic>?)?.cast<String>();
     } catch (e) {
-      print('[ERROR] AudioUnit listing failed: $e');
       return null;
     }
   }
@@ -329,13 +328,16 @@ class NativeBridge {
     if (events.isEmpty) return 0;
     
     _ensureInitialized();
-    final serializedData = _serializeEvents(events, sampleRate, tempo);
+    final serializedData = _serializeEvents(events, sampleRate, tempo, 0);
     final handleEventsNow = _handleEventsNow.asFunction<void Function(int, Pointer<Uint8>, int)>();
+    
+    // CRITICAL DEBUG: Log every native call with detailed info
+    // Prepare data for native call
     
     try {
       handleEventsNow(trackIndex, serializedData.rawData, serializedData.eventCount);
     } catch (e) {
-      print('[ERROR] Native handle_events_now call failed: $e');
+      // Silently continue - errors will be visible in native logs if needed
     } finally {
       malloc.free(serializedData.rawData);
     }
@@ -347,7 +349,8 @@ class NativeBridge {
     if (events.isEmpty) return 0;
 
     _ensureInitialized();
-    final serializedData = _serializeEvents(events, sampleRate, tempo);
+    // Important: include frameOffset so events serialize to absolute frames
+    final serializedData = _serializeEvents(events, sampleRate, tempo, frameOffset);
     final scheduleEvents = _scheduleEvents.asFunction<int Function(int, Pointer<Uint8>, int)>();
 
     final result = scheduleEvents(trackIndex, serializedData.rawData, serializedData.eventCount);
@@ -380,62 +383,9 @@ class NativeBridge {
     engineStop();
   }
 
-  /// Performance optimization: Cache for expensive frame calculations
-  static final Map<String, int> _frameCache = <String, int>{};
-  static int _lastCacheFrame = -1;
-
-  /// Optimized frame calculation with platform-specific caching
-  static int getOptimizedFrame(double beat, double tempo, int sampleRate) {
-    // ANDROID FIX: Use less aggressive caching on Android to prevent timing issues
-    final useCache = Platform.isIOS || Platform.isMacOS;
-    
-    if (useCache) {
-      // Create cache key for this calculation
-      final cacheKey = '${beat.toStringAsFixed(2)}_${tempo.toStringAsFixed(1)}_$sampleRate';
-      
-      // Check if we have a recent cached result
-      if (_frameCache.containsKey(cacheKey)) {
-        return _frameCache[cacheKey]!;
-      }
-      
-      // Calculate and cache result
-      final us = ((1 / tempo) * beat * 60000000).round();
-      final frames = (us * sampleRate / 1000000.0).round();
-      
-      // Cache the result with cleanup if cache gets too large
-      if (_frameCache.length > 50) { // Smaller cache for stability
-        _frameCache.clear();
-      }
-      _frameCache[cacheKey] = frames;
-      
-      return frames;
-    } else {
-      // Android: Always calculate fresh to avoid timing issues
-      final us = ((1 / tempo) * beat * 60000000).round();
-      return (us * sampleRate / 1000000.0).round();
-    }
-  }
-
-  /// Optimized loop position calculation to reduce CPU overhead during playback
-  static double getOptimizedLoopPosition(double currentBeat, double loopStartBeat, double loopEndBeat) {
-    if (loopEndBeat <= loopStartBeat) return currentBeat;
-    
-    final loopLength = loopEndBeat - loopStartBeat;
-    if (currentBeat < loopStartBeat) return currentBeat;
-    
-    // Optimized modulo calculation
-    final relativePosition = currentBeat - loopStartBeat;
-    return (relativePosition % loopLength) + loopStartBeat;
-  }
-
-  /// Clear performance caches when needed
-  static void clearPerformanceCaches() {
-    _frameCache.clear();
-    _lastCacheFrame = -1;
-  }
 
   static _SerializedEventData _serializeEvents(List<SchedulerEvent> events,
-      int sampleRate, double tempo) {
+      int sampleRate, double tempo, int correctionFrames) {
     final eventCount = events.length;
     final bytesPerEvent = SCHEDULER_EVENT_SIZE; // Use correct size from events.dart (16 bytes)
     final rawData = malloc.allocate<Uint8>(eventCount * bytesPerEvent);
@@ -445,7 +395,7 @@ class NativeBridge {
       final offset = i * bytesPerEvent;
 
       // Use the correct serializeBytes method from SchedulerEvent
-      final serializedBytes = event.serializeBytes(sampleRate, tempo, 0);
+      final serializedBytes = event.serializeBytes(sampleRate, tempo, correctionFrames);
       
       // Copy the properly serialized bytes to our raw data buffer
       for (int j = 0; j < bytesPerEvent; j++) {

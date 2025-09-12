@@ -58,15 +58,17 @@ void CocoaScheduler::handleRenderAudioRange(track_index_t trackIndex, uint32_t o
 };
 
 void CocoaScheduler::handleEvent(track_index_t trackIndex, SchedulerEvent event, UInt32 offsetFrame) {
+    // PERFORMANCE: Early exit for invalid tracks
     AudioUnit trackAU = mAudioUnitMap[trackIndex];
-    auto scaledOffsetFrame = scaleFrames(trackIndex, offsetFrame, false);
-    
     if (trackAU == nullptr) return;
+    
+    // OPTIMIZED: Pre-calculate scaled frame once
+    auto scaledOffsetFrame = scaleFrames(trackIndex, offsetFrame, false);
 
     if (event.type == VOLUME_EVENT) {
         auto volumeEvent = VolumeEventData(event.data);
         
-        // printf("Handing volume event at: %i on track %i, volume: %f\n", getPosition(), trackIndex, volumeEvent.volume);
+        // PERFORMANCE: Direct parameter setting with minimal overhead
         AudioUnitSetParameter(mMixerAudioUnit,
                               kMultiChannelMixerParam_Volume,
                               kAudioUnitScope_Input,
@@ -76,8 +78,18 @@ void CocoaScheduler::handleEvent(track_index_t trackIndex, SchedulerEvent event,
     } else if (event.type == MIDI_EVENT) {
         auto midiEvent = MidiEventData(event.data);
 
-        // printf("Handing midi event at: %i on track %i, status: %i, data1: %i, data2: %i, offsetFrame: %i\n", getPosition(), trackIndex, midiEvent.midiStatus, midiEvent.midiData1, midiEvent.midiData2, offsetFrame);
-        MusicDeviceMIDIEvent(trackAU, midiEvent.midiStatus, midiEvent.midiData1, midiEvent.midiData2, scaledOffsetFrame);
+        // CRITICAL: Sample-accurate MIDI event timing
+        OSStatus result = MusicDeviceMIDIEvent(trackAU, 
+                                              midiEvent.midiStatus, 
+                                              midiEvent.midiData1, 
+                                              midiEvent.midiData2, 
+                                              scaledOffsetFrame);
+        
+        // PERFORMANCE: Only log errors, not every event
+        if (result != noErr && midiEvent.midiStatus == 0x90) {
+            printf("MIDI event failed: track=%d, status=0x%02X, error=%d\n", 
+                   trackIndex, midiEvent.midiStatus, (int)result);
+        }
     }
 }
 

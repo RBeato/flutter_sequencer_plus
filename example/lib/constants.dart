@@ -1,6 +1,6 @@
 const INITIAL_STEP_COUNT = 8;
-const INITIAL_TEMPO = 240.0;
-const INITIAL_IS_LOOPING = false;
+const INITIAL_TEMPO = 120.0;
+const INITIAL_IS_LOOPING = true;
 const DEFAULT_VELOCITY = 0.75;
 
 // General MIDI drum map: 36=Kick, 38=Snare, 42=Closed HH, 46=Open HH

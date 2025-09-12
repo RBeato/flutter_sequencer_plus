@@ -156,10 +156,8 @@ class GlobalState {
   }
 
   void _setupEngine() async {
-    print('[DEBUG] GlobalState: Starting engine setup...');
     try {
       sampleRate = await NativeBridge.doSetup();
-      print('[DEBUG] GlobalState: Engine setup completed with sample rate: $sampleRate');
       isEngineReady = true;
       for (var callback in onEngineReadyCallbacks) {
         callback();
@@ -169,7 +167,6 @@ class GlobalState {
         NativeBridge.play();
       }
     } catch (e) {
-      print('[ERROR] GlobalState: Engine setup failed: $e');
       // Set a default sample rate so the app doesn't hang
       sampleRate = 44100;
       isEngineReady = true;

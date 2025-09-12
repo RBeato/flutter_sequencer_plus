@@ -34,8 +34,6 @@ class Sequence {
     for (var track in _tracks.values) {
       deleteTrack(track);
     }
-    // OPTIMIZED: Clear performance caches when sequence is destroyed
-    NativeBridge.clearPerformanceCaches();
     globalState.unregisterSequence(this);
   }
 
@@ -102,8 +100,20 @@ class Sequence {
   void play() {
     if (!globalState.isEngineReady) return;
 
-    if (getIsOver()) {
-      setBeat(0.0);
+    // CRITICAL FIX: When starting playback with loop enabled, always jump to loop start.
+    // This ensures pressing Play with Loop on starts from the first step of the loop
+    // rather than resuming from a previous paused position.
+    if (!isPlaying) {
+      if (loopState != LoopState.Off) {
+        setBeat(loopStartBeat);
+      } else if (getIsOver()) {
+        setBeat(0.0);
+      }
+    }
+
+    // If we rely on Dart dispatch on iOS, clear any native buffers to avoid double triggers
+    if (Platform.isIOS && DISABLE_NATIVE_SCHEDULING_IOS) {
+      getTracks().forEach((track) => track.clearBuffer());
     }
 
     globalState.playSequence(id);
@@ -148,9 +158,11 @@ class Sequence {
     tempo = nextTempo;
 
     // OPTIMIZED: Batch sync buffer operations to reduce overhead
-    final tracks = getTracks();
-    for (int i = 0; i < tracks.length; i++) {
-      tracks[i].syncBuffer();
+    if (!(Platform.isIOS && DISABLE_NATIVE_SCHEDULING_IOS)) {
+      final tracks = getTracks();
+      for (int i = 0; i < tracks.length; i++) {
+        tracks[i].syncBuffer();
+      }
     }
   }
 
@@ -188,9 +200,11 @@ class Sequence {
 
     // OPTIMIZED: Platform-specific buffer sync strategy
     // Android needs more frequent syncing to prevent note accumulation
-    final shouldSync = Platform.isAndroid 
-        ? (!wasLooping || significantChange || (this.loopStartBeat != loopStartBeat) || (this.loopEndBeat != loopEndBeat))
-        : (!wasLooping || significantChange);
+    final shouldSync = (Platform.isIOS && DISABLE_NATIVE_SCHEDULING_IOS)
+        ? false
+        : (Platform.isAndroid 
+            ? (!wasLooping || significantChange || (this.loopStartBeat != loopStartBeat) || (this.loopEndBeat != loopEndBeat))
+            : (!wasLooping || significantChange));
         
     if (shouldSync) {
       getTracks().forEach((track) => track.syncBuffer());
@@ -212,7 +226,7 @@ class Sequence {
     loopState = LoopState.Off;
 
     // OPTIMIZED: Only sync buffers if we were actually looping
-    if (wasLooping) {
+    if (wasLooping && !(Platform.isIOS && DISABLE_NATIVE_SCHEDULING_IOS)) {
       getTracks().forEach((track) => track.syncBuffer());
     }
   }
@@ -237,9 +251,11 @@ class Sequence {
     engineStartFrame = NativeBridge.getPosition() - frame;
     pauseBeat = beat;
 
-    getTracks().forEach((track) {
-      track.syncBuffer(engineStartFrame);
-    });
+    if (!(Platform.isIOS && DISABLE_NATIVE_SCHEDULING_IOS)) {
+      getTracks().forEach((track) {
+        track.syncBuffer(engineStartFrame);
+      });
+    }
 
     if (loopState != LoopState.Off) {
       final loopEndFrame = beatToFrames(loopEndBeat);
@@ -314,15 +330,8 @@ class Sequence {
   }
 
   /// {@macro flutter_sequencer_library_private}
-  /// Converts a beat to sample frames with optimized caching.
+  /// Converts a beat to sample frames.
   int beatToFrames(double beat) {
-    // OPTIMIZED: Use cached calculation for frequently accessed beats
-    final sampleRate = Sequence.globalState.sampleRate;
-    if (sampleRate != null) {
-      return NativeBridge.getOptimizedFrame(beat, tempo, sampleRate);
-    }
-    
-    // Fallback to original calculation if sample rate not available
     final us = ((1 / tempo) * beat * (60000000)).round();
     return Sequence.globalState.usToFrames(us);
   }
@@ -374,10 +383,17 @@ class Sequence {
   /// Returns the number of frames elapsed since the last audio render callback
   /// was called.
   int _getFramesSinceLastRender() {
+    // Avoid mixing wall-clock (DateTime) with native monotonic clocks on Apple platforms,
+    // which can introduce jitter at loop boundaries. On iOS/macOS, rely only on the
+    // render-callback-driven frame count (return 0 for inter-callback estimate).
+    if (Platform.isIOS || Platform.isMacOS) {
+      return 0;
+    }
+
     final microsecondsSinceLastRender = max(
-        0,
-        DateTime.now().microsecondsSinceEpoch -
-            NativeBridge.getLastRenderTimeUs());
+      0,
+      DateTime.now().microsecondsSinceEpoch - NativeBridge.getLastRenderTimeUs(),
+    );
 
     return globalState.usToFrames(microsecondsSinceLastRender);
   }

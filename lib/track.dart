@@ -194,15 +194,11 @@ class Track {
     
     final nextBeat = sequence.getBeat();
     final midiVelocity = _velocityToMidi(velocity);
-    print('[DEBUG] startNoteNow: noteNumber=$noteNumber velocity=$velocity midiVelocity=$midiVelocity');
-    
     // Send Note ON immediately
     final noteOnEvent = MidiEvent.ofNoteOn(
         beat: nextBeat,
         noteNumber: noteNumber,
         velocity: midiVelocity);
-
-    print('[DEBUG] Created MidiEvent: beat=$nextBeat status=${noteOnEvent.midiStatus} data1=${noteOnEvent.midiData1} data2=${noteOnEvent.midiData2}');
     NativeBridge.handleEventsNow(
         id, [noteOnEvent], Sequence.globalState.sampleRate!, sequence.tempo);
     
@@ -351,6 +347,13 @@ class Track {
   /// that the changes are synced immediately.
   void syncBuffer(
       [int? absoluteStartFrame, int maxEventsToSync = BUFFER_SIZE]) {
+    // iOS dart-dispatch mode: do not schedule natively to avoid double triggers
+    if (Platform.isIOS && DISABLE_NATIVE_SCHEDULING_IOS) {
+      if (DEBUG_SEQUENCER_LOGS) {
+        print('[Track:$id] syncBuffer skipped (iOS dart-dispatch mode)');
+      }
+      return;
+    }
     final position = NativeBridge.getPosition();
 
     if (absoluteStartFrame == null) {
@@ -359,14 +362,15 @@ class Track {
       absoluteStartFrame = max(absoluteStartFrame, position);
     }
 
-    // OPTIMIZED: Platform-specific clearing strategy
-    // Android needs more frequent clearing to prevent note accumulation
     final positionDiff = (absoluteStartFrame - lastFrameSynced).abs();
-    final shouldClear = Platform.isAndroid 
-        ? positionDiff > 10  // More frequent clearing on Android
-        : positionDiff > 100; // Less frequent on iOS/macOS for performance
-        
-    if (shouldClear) {
+    
+    // SEAMLESS LOOP FIX: NEVER clear events during looping to prevent audible restart
+    // This restores the original flutter_sequencer "buffer topping off" behavior
+    final isLooping = sequence.loopState != LoopState.Off;
+    final clearThreshold = isLooping ? 999999 : 100; // Extremely high threshold during loops
+    
+    if (positionDiff > clearThreshold && !isLooping) {
+      // Only clear events when NOT looping - this prevents the audible restart
       NativeBridge.clearEvents(id, absoluteStartFrame);
     }
 
@@ -382,6 +386,13 @@ class Track {
   /// Triggers a sync that will fill any available space in the buffer with
   /// any un-synced events.
   void topOffBuffer() {
+    // iOS dart-dispatch mode: do not top-off native buffer
+    if (Platform.isIOS && DISABLE_NATIVE_SCHEDULING_IOS) {
+      if (DEBUG_SEQUENCER_LOGS) {
+        print('[Track:$id] topOffBuffer skipped (iOS dart-dispatch mode)');
+      }
+      return;
+    }
     final bufferAvailableCount = NativeBridge.getBufferAvailableCount(id);
 
     if (bufferAvailableCount > 0) {
@@ -421,8 +432,10 @@ class Track {
     final isBeforeLoopEnd = sequence.loopState == LoopState.BeforeLoopEnd;
     
     if (!isBeforeLoopEnd) {
-      // Simple case: no looping, use optimized path
-      _scheduleEventsInRangeOptimized(
+      if (DEBUG_SEQUENCER_LOGS) {
+        print('[Track:$id] schedule(no-loop) startFrame=$startFrame endFrame=${sequence.beatToFrames(sequence.endBeat)} max=$maxEventsToSync');
+      }
+      _scheduleEventsInRange(
           maxEventsToSync,
           startFrame,
           sequence.beatToFrames(sequence.endBeat),
@@ -436,7 +449,11 @@ class Track {
     final loopStartFrame = sequence.beatToFrames(sequence.loopStartBeat);
     final loopEndFrame = sequence.beatToFrames(sequence.loopEndBeat);
 
-    var eventsSyncedCount = _scheduleEventsInRangeOptimized(
+    if (DEBUG_SEQUENCER_LOGS) {
+      print('[Track:$id] schedule(loop) startFrame=$startFrame loopStart=$loopStartFrame loopEnd=$loopEndFrame loopLen=$loopLength loopsElapsed=$loopsElapsed max=$maxEventsToSync');
+    }
+
+    var eventsSyncedCount = _scheduleEventsInRange(
         maxEventsToSync,
         sequence.getLoopedFrame(startFrame),
         loopEndFrame,
@@ -448,7 +465,10 @@ class Track {
     var maxLoopIterations = 10; // Safety limit to prevent infinite loops
 
     while (eventsSyncedCount < maxEventsToSync && maxLoopIterations > 0) {
-      lastBatchCount = _scheduleEventsInRangeOptimized(
+      if (DEBUG_SEQUENCER_LOGS) {
+        print('[Track:$id] schedule(loop-iter) idx=$loopIndex remaining=${maxEventsToSync - eventsSyncedCount} offset=${loopLength * loopIndex}');
+      }
+      lastBatchCount = _scheduleEventsInRange(
           maxEventsToSync - eventsSyncedCount,
           loopStartFrame,
           loopEndFrame,
@@ -466,21 +486,17 @@ class Track {
     _scheduleEventsOptimized(startFrame, maxEventsToSync);
   }
 
-  /// Optimized event scheduling with reduced frame calculations
-  int _scheduleEventsInRangeOptimized(
+  int _scheduleEventsInRange(
       int maxEventsToSync, int startFrame, int? endFrame, int frameOffset) {
     final eventsToSync = <SchedulerEvent>[];
     final sampleRate = Sequence.globalState.sampleRate!;
     final tempo = sequence.tempo;
 
-    // OPTIMIZED: Pre-filter events to reduce beatToFrames calls
     for (var eventIndex = 0; eventIndex < events.length; eventIndex++) {
       if (eventsToSync.length >= maxEventsToSync) break;
 
       final event = events[eventIndex];
-      
-      // OPTIMIZED: Use cached frame calculation when possible
-      final eventFrame = NativeBridge.getOptimizedFrame(event.beat, tempo, sampleRate);
+      final eventFrame = sequence.beatToFrames(event.beat);
 
       if (eventFrame < startFrame) continue;
       if (endFrame != null && eventFrame > endFrame) break;
@@ -501,17 +517,17 @@ class Track {
 
     if (eventsSyncedCount > 0) {
       final lastEvent = eventsToSync[eventsSyncedCount - 1];
-      final lastEventFrame = NativeBridge.getOptimizedFrame(lastEvent.beat, tempo, sampleRate);
+      final lastEventFrame = sequence.beatToFrames(lastEvent.beat);
       lastFrameSynced = sequence.engineStartFrame + lastEventFrame + frameOffset;
+      if (DEBUG_SEQUENCER_LOGS) {
+        final firstEvent = eventsToSync.first;
+        final firstFrame = sequence.beatToFrames(firstEvent.beat) + sequence.engineStartFrame + frameOffset;
+        final lastAbs = lastEventFrame + sequence.engineStartFrame + frameOffset;
+        print('[Track:$id] synced count=$eventsSyncedCount firstAbs=$firstFrame lastAbs=$lastAbs frameOffset=$frameOffset engineStart=${sequence.engineStartFrame}');
+      }
     }
 
     return eventsSyncedCount;
-  }
-  
-  /// Legacy method redirected to optimized version  
-  int _scheduleEventsInRange(
-      int maxEventsToSync, int startFrame, int? endFrame, int frameOffset) {
-    return _scheduleEventsInRangeOptimized(maxEventsToSync, startFrame, endFrame, frameOffset);
   }
 
   /// Used for ordering events.
