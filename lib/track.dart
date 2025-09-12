@@ -348,7 +348,7 @@ class Track {
   void syncBuffer(
       [int? absoluteStartFrame, int maxEventsToSync = BUFFER_SIZE]) {
     // iOS dart-dispatch mode: do not schedule natively to avoid double triggers
-    if (Platform.isIOS && DISABLE_NATIVE_SCHEDULING_IOS) {
+    if (Platform.isIOS && !Sequence.globalState.iosNativeSchedulingEnabled) {
       if (DEBUG_SEQUENCER_LOGS) {
         print('[Track:$id] syncBuffer skipped (iOS dart-dispatch mode)');
       }
@@ -387,7 +387,7 @@ class Track {
   /// any un-synced events.
   void topOffBuffer() {
     // iOS dart-dispatch mode: do not top-off native buffer
-    if (Platform.isIOS && DISABLE_NATIVE_SCHEDULING_IOS) {
+    if (Platform.isIOS && !Sequence.globalState.iosNativeSchedulingEnabled) {
       if (DEBUG_SEQUENCER_LOGS) {
         print('[Track:$id] topOffBuffer skipped (iOS dart-dispatch mode)');
       }

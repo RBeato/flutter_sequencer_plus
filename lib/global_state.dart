@@ -20,6 +20,9 @@ class GlobalState {
   }
 
   var keepEngineRunning = false;
+  // Runtime-configurable: whether to use native scheduling on iOS
+  // Default false to match current Dart-dispatch mode in the example app.
+  bool iosNativeSchedulingEnabled = false;
   final sequenceIdMap = <int, Sequence>{};
   int? sampleRate;
   var isEngineReady = false;
@@ -79,6 +82,14 @@ class GlobalState {
   /// an instrument in real time.
   void setKeepEngineRunning(bool nextValue) {
     keepEngineRunning = nextValue;
+  }
+
+  /// Enables or disables native scheduling on iOS at runtime.
+  /// When false, the library will avoid scheduling events natively on iOS
+  /// (intended for Dart-dispatch mode in host apps). When true, native
+  /// scheduling is used as in Android.
+  void setIosNativeSchedulingEnabled(bool enabled) {
+    iosNativeSchedulingEnabled = enabled;
   }
 
   /// {@template flutter_sequencer_library_private}

@@ -112,7 +112,7 @@ class Sequence {
     }
 
     // If we rely on Dart dispatch on iOS, clear any native buffers to avoid double triggers
-    if (Platform.isIOS && DISABLE_NATIVE_SCHEDULING_IOS) {
+    if (Platform.isIOS && !GlobalState().iosNativeSchedulingEnabled) {
       getTracks().forEach((track) => track.clearBuffer());
     }
 
@@ -158,7 +158,7 @@ class Sequence {
     tempo = nextTempo;
 
     // OPTIMIZED: Batch sync buffer operations to reduce overhead
-    if (!(Platform.isIOS && DISABLE_NATIVE_SCHEDULING_IOS)) {
+    if (!(Platform.isIOS && !GlobalState().iosNativeSchedulingEnabled)) {
       final tracks = getTracks();
       for (int i = 0; i < tracks.length; i++) {
         tracks[i].syncBuffer();
@@ -200,7 +200,7 @@ class Sequence {
 
     // OPTIMIZED: Platform-specific buffer sync strategy
     // Android needs more frequent syncing to prevent note accumulation
-    final shouldSync = (Platform.isIOS && DISABLE_NATIVE_SCHEDULING_IOS)
+    final shouldSync = (Platform.isIOS && !GlobalState().iosNativeSchedulingEnabled)
         ? false
         : (Platform.isAndroid 
             ? (!wasLooping || significantChange || (this.loopStartBeat != loopStartBeat) || (this.loopEndBeat != loopEndBeat))
@@ -226,7 +226,7 @@ class Sequence {
     loopState = LoopState.Off;
 
     // OPTIMIZED: Only sync buffers if we were actually looping
-    if (wasLooping && !(Platform.isIOS && DISABLE_NATIVE_SCHEDULING_IOS)) {
+    if (wasLooping && !(Platform.isIOS && !GlobalState().iosNativeSchedulingEnabled)) {
       getTracks().forEach((track) => track.syncBuffer());
     }
   }
@@ -251,7 +251,7 @@ class Sequence {
     engineStartFrame = NativeBridge.getPosition() - frame;
     pauseBeat = beat;
 
-    if (!(Platform.isIOS && DISABLE_NATIVE_SCHEDULING_IOS)) {
+    if (!(Platform.isIOS && !GlobalState().iosNativeSchedulingEnabled)) {
       getTracks().forEach((track) {
         track.syncBuffer(engineStartFrame);
       });
