@@ -147,9 +147,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   bool isLooping = INITIAL_IS_LOOPING;
   bool isPaused = false;
   int _loopCycle = 0; // increments on each loop wrap
-  // When true, rely entirely on native scheduling (avoids double triggers at loop start)
-  // iOS example requires Dart dispatch for SF2; keep this false
-  final bool _useNativeScheduling = false;
+  // When true, rely entirely on native scheduling (Android); on iOS we use Dart dispatch
+  final bool _useNativeScheduling = !Platform.isIOS;
   
   
   // Simple playback system
@@ -565,13 +564,13 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       position = nativeBeat;
     });
     
-    // Avoid double-trigger: if native scheduling is active, do not dispatch from Dart
+    // Avoid double-trigger: only dispatch from Dart when native scheduling is disabled (iOS)
     if (!_useNativeScheduling) {
       _processEventsAtBeat(nativeBeat);
     }
 
     // Robust loop-cycle tracking using absolute frame position
-    if (isLooping && stepCount > 0) {
+    if (!_useNativeScheduling && isLooping && stepCount > 0) {
       final posFrames = NativeBridge.getPosition();
       final loopLenFrames = (stepCount * (60.0 / tempo) * (GlobalState().sampleRate ?? 44100)).round();
       if (loopLenFrames > 0) {
