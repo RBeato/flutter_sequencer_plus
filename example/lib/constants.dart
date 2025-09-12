@@ -3,6 +3,10 @@ const INITIAL_TEMPO = 120.0;
 const INITIAL_IS_LOOPING = true;
 const DEFAULT_VELOCITY = 0.75;
 
+/// Example-app specific logging switch (mirrors library's flag)
+/// Disable by default for performance
+const DEBUG_SEQUENCER_LOGS = false;
+
 // General MIDI drum map: 36=Kick, 38=Snare, 42=Closed HH, 46=Open HH
 // Testing different note for last column since CB (56) might not work in all SF2s
 const ROW_LABELS_DRUMS = ['HH', 'S', 'K', 'Cr'];  // Changed CB to Cr (Crash)

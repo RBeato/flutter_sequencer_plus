@@ -660,7 +660,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         _lastSentUs[eventKey] = nowUs;
         // SEND log for verification at loop start
         final stepNumber = stepIndex;
-        if (stepNumber == 0 && (event.midiStatus & 0xF0) == 0x90 && event.midiData2 > 0) {
+        if (DEBUG_SEQUENCER_LOGS && stepNumber == 0 && (event.midiStatus & 0xF0) == 0x90 && event.midiData2 > 0) {
           print('[SEND] loopCycle=${_loopCycle} track=${track.id} step=0 beat=${effectiveBeat.toStringAsFixed(3)} note=${event.midiData1}');
         }
         

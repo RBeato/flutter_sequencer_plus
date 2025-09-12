@@ -15,7 +15,8 @@ const LEAD_FRAMES = 1024;
 const DEFAULT_PATCH_NUMBER = 0;
 
 /// Enable verbose logging for timing and loop diagnostics
-const DEBUG_SEQUENCER_LOGS = true;
+/// NOTE: Disable in production builds for better performance
+const DEBUG_SEQUENCER_LOGS = false;
 
 /// When true, the library will avoid scheduling events natively on iOS and
 /// let the host app (example) handle real-time dispatch from Dart instead.
