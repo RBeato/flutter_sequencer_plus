@@ -1609,12 +1609,14 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   
   // PERFORMANCE OPTIMIZATION: Pre-computed event scheduling system
   void _ensureEventTimeline() {
-    // Rebuild timeline only when necessary
+    // Rebuild timeline when necessary: explicit rebuild request OR parameter changes
     if (!_timelineNeedsRebuild && 
         _lastTimelineStepCount == stepCount && 
         (_lastTimelineTempo - tempo).abs() < 0.01) {
       return; // Timeline is up to date
     }
+    
+    print('[TIMELINE-REBUILD] Rebuilding event timeline: needsRebuild=$_timelineNeedsRebuild, stepCount=$stepCount->$_lastTimelineStepCount, tempo=${tempo.toStringAsFixed(1)}->${_lastTimelineTempo.toStringAsFixed(1)}');
     
     // Performance: Rebuilding event timeline
     _eventTimeline.clear();
