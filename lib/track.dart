@@ -347,11 +347,12 @@ class Track {
   /// that the changes are synced immediately.
   void syncBuffer(
       [int? absoluteStartFrame, int maxEventsToSync = BUFFER_SIZE]) {
+    // SURGICAL DEBUG: Track all sync operations
+    print('[SYNC-DEBUG] Track $id: syncBuffer called, iosNativeSchedulingEnabled=${Sequence.globalState.iosNativeSchedulingEnabled}');
+    
     // iOS dart-dispatch mode: do not schedule natively to avoid double triggers
     if (Platform.isIOS && !Sequence.globalState.iosNativeSchedulingEnabled) {
-      if (DEBUG_SEQUENCER_LOGS) {
-        print('[Track:$id] syncBuffer skipped (iOS dart-dispatch mode)');
-      }
+      print('[SYNC-DEBUG] Track $id: syncBuffer SKIPPED (iOS dart-dispatch mode)');
       return;
     }
     final position = NativeBridge.getPosition();
@@ -376,8 +377,10 @@ class Track {
 
     if (sequence.isPlaying) {
       final relativeStartFrame = absoluteStartFrame - sequence.engineStartFrame;
+      print('[SYNC-DEBUG] Track $id: sequence.isPlaying=true, calling _scheduleEventsOptimized(relativeStartFrame=$relativeStartFrame, maxEvents=$maxEventsToSync)');
       _scheduleEventsOptimized(relativeStartFrame, maxEventsToSync);
     } else {
+      print('[SYNC-DEBUG] Track $id: sequence.isPlaying=false, setting lastFrameSynced=0');
       lastFrameSynced = 0;
     }
   }
@@ -386,11 +389,12 @@ class Track {
   /// Triggers a sync that will fill any available space in the buffer with
   /// any un-synced events.
   void topOffBuffer() {
+    // SURGICAL DEBUG: Track top-off operations
+    print('[TOPOFF-DEBUG] Track $id: topOffBuffer called, iosNativeSchedulingEnabled=${Sequence.globalState.iosNativeSchedulingEnabled}');
+    
     // iOS dart-dispatch mode: do not top-off native buffer
     if (Platform.isIOS && !Sequence.globalState.iosNativeSchedulingEnabled) {
-      if (DEBUG_SEQUENCER_LOGS) {
-        print('[Track:$id] topOffBuffer skipped (iOS dart-dispatch mode)');
-      }
+      print('[TOPOFF-DEBUG] Track $id: topOffBuffer SKIPPED (iOS dart-dispatch mode)');
       return;
     }
     final bufferAvailableCount = NativeBridge.getBufferAvailableCount(id);
@@ -508,12 +512,14 @@ class Track {
       return 0;
     }
 
+    print('[SCHEDULE-DEBUG] Track $id: About to schedule ${eventsToSync.length} events to NativeBridge.scheduleEvents');
     final eventsSyncedCount = NativeBridge.scheduleEvents(
         id,
         eventsToSync,
         sampleRate,
         tempo,
         sequence.engineStartFrame + frameOffset);
+    print('[SCHEDULE-DEBUG] Track $id: NativeBridge.scheduleEvents returned eventsSyncedCount=$eventsSyncedCount');
 
     if (eventsSyncedCount > 0) {
       final lastEvent = eventsToSync[eventsSyncedCount - 1];

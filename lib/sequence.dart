@@ -111,11 +111,18 @@ class Sequence {
       }
     }
 
+    // SURGICAL DEBUG: Track sequence play operations
+    print('[SEQUENCE-DEBUG] Sequence.play(): Platform.isIOS=${Platform.isIOS}, iosNativeSchedulingEnabled=${GlobalState().iosNativeSchedulingEnabled}');
+    
     // If we rely on Dart dispatch on iOS, clear any native buffers to avoid double triggers
     if (Platform.isIOS && !GlobalState().iosNativeSchedulingEnabled) {
+      print('[SEQUENCE-DEBUG] Clearing native buffers for iOS dart-dispatch mode');
       getTracks().forEach((track) => track.clearBuffer());
+    } else {
+      print('[SEQUENCE-DEBUG] Using native scheduling - NOT clearing buffers');
     }
 
+    print('[SEQUENCE-DEBUG] Calling globalState.playSequence(id=$id)');
     globalState.playSequence(id);
   }
 

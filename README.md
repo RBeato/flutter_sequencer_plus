@@ -265,6 +265,97 @@ This will keep the audio engine running even when all sequences are paused. Set 
 need to trigger sounds when the sequence is paused. Don't do it otherwise, since it will increase
 energy usage.
 
+### iOS integration modes (runtime selectable)
+
+On iOS you can choose the scheduling mode at runtime via `GlobalState().setIosNativeSchedulingEnabled(...)`:
+
+- Native buffer scheduling (recommended): engine schedules NoteOn/Off internally.
+- Dart-only dispatch: your app drives timing and dispatch via `NativeBridge.handleEventsNow()`.
+
+Pick one mode. Do not mix both on the same platform.
+
+#### 1) iOS native scheduling (recommended)
+
+Use this if you want the same behavior as Android (lowest jitter, simplest code):
+
+```dart
+// Before creating the Sequence
+GlobalState().setKeepEngineRunning(true);
+GlobalState().setIosNativeSchedulingEnabled(true);
+
+final sequence = Sequence(tempo: 120.0, endBeat: 8.0);
+
+final tracks = await sequence.createTracks([
+  Sf2Instrument(path: 'assets/sf2/j_piano.sf2', isAsset: true),
+]);
+
+// Schedule notes
+tracks[0].addNote(noteNumber: 60, velocity: 0.9, startBeat: 0.0, durationBeats: 1.0);
+tracks[0].addNote(noteNumber: 64, velocity: 0.9, startBeat: 1.0, durationBeats: 1.0);
+tracks[0].addNote(noteNumber: 67, velocity: 0.9, startBeat: 2.0, durationBeats: 1.0);
+
+// Ensure audible mixer level and fill native buffers
+tracks[0].changeVolumeNow(volume: 0.8);
+tracks[0].syncBuffer();
+tracks[0].topOffBuffer();
+
+// Use native loop transport
+sequence.setLoop(0.0, 8.0);
+
+// Start from beat 0 and play
+sequence.setBeat(0.0);
+sequence.play();
+```
+
+#### 2) iOS Dart-only dispatch (advanced)
+
+Use this if you need full control over timing and event emission from Dart:
+
+```dart
+// Before creating the Sequence
+GlobalState().setKeepEngineRunning(true);
+GlobalState().setIosNativeSchedulingEnabled(false); // disables native scheduling on iOS
+
+final sequence = Sequence(tempo: 120.0, endBeat: 8.0);
+final tracks = await sequence.createTracks([
+  Sf2Instrument(path: 'assets/sf2/j_piano.sf2', isAsset: true),
+]);
+
+// Add events to your own UI model (not to native buffers)
+// Do NOT call syncBuffer/topOffBuffer on iOS in this mode.
+
+// Start transport
+sequence.setLoop(0.0, 8.0);
+sequence.setBeat(0.0);
+sequence.play();
+
+// Run a periodic timer (2–5 ms) to compute current beat and dispatch due events
+final timer = Timer.periodic(const Duration(milliseconds: 3), (_) {
+  final beat = /* compute from monotonic time */;
+  final dueEvents = /* your lookup: events within a small window around beat */;
+  if (dueEvents.isNotEmpty) {
+    NativeBridge.handleEventsNow(tracks[0].id, dueEvents, GlobalState().sampleRate!, sequence.getTempo());
+  }
+});
+```
+
+> Notes
+> - In Dart-only mode, consider sending CC123/CC120/CC64=0 at loop wrap and using an ~8ms de-duplication window to prevent double triggers.
+> - Do not mix native buffer scheduling with Dart dispatch on iOS; pick one mode.
+
+#### Quick sound verification snippet (optional)
+
+You can add a one-time sound check right after `sequence.play()` to ensure the audio path is open:
+
+```dart
+// Immediately after sequence.play(), send a short NoteOn/Off once
+if (Platform.isIOS && GlobalState().iosNativeSchedulingEnabled) {
+  final t = tracks.first;
+  t.startNoteNow(noteNumber: 72, velocity: 0.7); // C5
+  Future.delayed(const Duration(milliseconds: 30), () => t.stopNoteNow(noteNumber: 72));
+}
+```
+
 ### Create tracks
 ```dart
 sequence.createTracks(instruments).then((tracks) {

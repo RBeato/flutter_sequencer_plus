@@ -2,10 +2,12 @@
 const SECONDS_PER_US = 1 / 1000000;
 
 /// The size of the event buffer in the native backend
-const BUFFER_SIZE = 1024;
+/// Increased for fewer under-runs during fast passages and dense grids
+const BUFFER_SIZE = 4096;
 
 /// Interval to "top off" each track's buffer, in milliseconds
-const TOP_OFF_PERIOD_MS = 1000;
+/// Faster refill cadence improves stability at loop wraps and pattern changes
+const TOP_OFF_PERIOD_MS = 250;
 
 /// "Lead frames" account for the fact that it may take some time to build the
 /// events and sync them with the native sequencer engine.
@@ -18,8 +20,7 @@ const DEFAULT_PATCH_NUMBER = 0;
 /// NOTE: Disable in production builds for better performance
 const DEBUG_SEQUENCER_LOGS = false;
 
-/// When true, the library will avoid scheduling events natively on iOS and
-/// let the host app (example) handle real-time dispatch from Dart instead.
-/// This prevents double-triggers at loop boundaries when both native and Dart
-/// dispatch are active.
-const DISABLE_NATIVE_SCHEDULING_IOS = true;
+/// Legacy switch kept for backwards compatibility (not used by runtime path).
+/// Default to allowing native scheduling on iOS (host apps can override at runtime
+/// via GlobalState().setIosNativeSchedulingEnabled(false)).
+const DISABLE_NATIVE_SCHEDULING_IOS = false;

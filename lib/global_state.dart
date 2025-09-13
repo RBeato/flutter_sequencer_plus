@@ -20,8 +20,8 @@ class GlobalState {
   }
 
   var keepEngineRunning = false;
-  // Runtime-configurable: whether to use native scheduling on iOS
-  // Default false to match current Dart-dispatch mode in the example app.
+  // FIXED APPROACH: iOS needs Dart-based scheduling due to native bridge incompatibility
+  // iOS native bridge returns eventsSyncedCount=0, rejecting all events
   bool iosNativeSchedulingEnabled = false;
   final sequenceIdMap = <int, Sequence>{};
   int? sampleRate;
@@ -197,7 +197,7 @@ class GlobalState {
     _startPositionTracking();
 
     if (_topOffTimer != null) _topOffTimer!.cancel();
-    _topOffTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) {
+    _topOffTimer = Timer.periodic(Duration(milliseconds: TOP_OFF_PERIOD_MS), (_) {
       _topOffAllBuffers();
 
       for (var sequence in sequenceIdMap.values) {
