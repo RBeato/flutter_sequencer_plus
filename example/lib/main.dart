@@ -903,6 +903,15 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   void markTrackDirty(int trackId) {
     _tracksDirty[trackId] = true;
     _timelineNeedsRebuild = true;
+    
+    // REAL-TIME EDITING FIX: Immediately rebuild timeline and clear processed events
+    // This ensures new sounds added during playback are heard without stop/restart
+    if (isPlaying) {
+      _ensureEventTimeline(); // Force immediate rebuild
+      _processedEvents.clear(); // Clear processed events cache to allow new events
+      _lastSentUs.clear(); // Clear timing guards for immediate playback
+      print('[REAL-TIME] Timeline rebuilt and event cache cleared for immediate playback');
+    }
   }
   
   void syncTrack(Track track) {
