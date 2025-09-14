@@ -908,6 +908,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     if (isPlaying) {
       if (Platform.isAndroid) {
         // Android always needs track buffer re-sync regardless of scheduling mode
+        print('[ANDROID-REALTIME] Calling _rescheduleTrackForAndroid for track $trackId');
         _rescheduleTrackForAndroid(trackId);
       } else {
         // iOS uses Dart scheduling - just clear caches
@@ -918,18 +919,26 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
   
   void _rescheduleTrackForAndroid(int trackId) {
+    print('[ANDROID-REALTIME] _rescheduleTrackForAndroid START for track $trackId');
+    
     // Find the track
     final track = tracks.firstWhere((t) => t.id == trackId, orElse: () => tracks.first);
     final stepSequencerState = trackStepSequencerStates[trackId];
-    if (stepSequencerState == null) return;
+    if (stepSequencerState == null) {
+      print('[ANDROID-REALTIME] stepSequencerState is null for track $trackId - ABORTING');
+      return;
+    }
     
     // Clear the native buffer for this track
+    print('[ANDROID-REALTIME] Clearing buffer for track $trackId');
     track.clearBuffer();
     
     // Get current playback position
     final currentBeat = sequence.getBeat();
     final currentTempo = sequence.getTempo();
     final noteDuration = _calculateNoteDuration(currentTempo);
+    
+    print('[ANDROID-REALTIME] currentBeat=$currentBeat, tempo=$currentTempo, isLooping=$isLooping');
     
     // Collect new events
     List<SchedulerEvent> eventsToSchedule = [];
@@ -976,11 +985,16 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     });
     
     // Re-schedule events to native buffer
+    print('[ANDROID-REALTIME] Found ${eventsToSchedule.length} events to reschedule');
     if (eventsToSchedule.isNotEmpty) {
       // Sync the track buffer with the new events
       track.clearEvents();
       track.events.addAll(eventsToSchedule);
+      print('[ANDROID-REALTIME] Added ${eventsToSchedule.length} events to track, calling syncBuffer()');
       track.syncBuffer();
+      print('[ANDROID-REALTIME] syncBuffer() completed for track $trackId');
+    } else {
+      print('[ANDROID-REALTIME] No events to reschedule for track $trackId');
     }
   }
   
