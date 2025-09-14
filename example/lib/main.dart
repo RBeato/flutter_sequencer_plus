@@ -948,8 +948,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         final beat = step.toDouble();
         final midiVelocity = (velocity * 127).round().clamp(1, 127);
         
-        if (isLooping) {
-          // For looping: schedule all events (they'll loop automatically)
+        // Always schedule ALL events for looping, or future events for linear playback
+        final shouldSchedule = isLooping || beat >= currentBeat;
+        
+        if (shouldSchedule) {
           eventsToSchedule.add(MidiEvent(
             beat: beat,
             midiStatus: 0x90,
@@ -963,23 +965,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
             midiData1: noteNumber,
             midiData2: 0,
           ));
+          
+          print('[ANDROID-REALTIME] Scheduled event at beat $beat (currentBeat=$currentBeat, isLooping=$isLooping)');
         } else {
-          // For linear playback: only schedule future events
-          if (beat >= currentBeat) {
-            eventsToSchedule.add(MidiEvent(
-              beat: beat,
-              midiStatus: 0x90,
-              midiData1: noteNumber,
-              midiData2: midiVelocity,
-            ));
-            
-            eventsToSchedule.add(MidiEvent(
-              beat: beat + noteDuration,
-              midiStatus: 0x80,
-              midiData1: noteNumber,
-              midiData2: 0,
-            ));
-          }
+          print('[ANDROID-REALTIME] Skipped past event at beat $beat (currentBeat=$currentBeat)');
         }
       }
     });
