@@ -573,7 +573,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     });
     
     // iOS DART SCHEDULING: Process events in Dart since native bridge rejects events
-    print('[TIMER-DEBUG] _useNativeScheduling=$_useNativeScheduling, isPlaying=$isPlaying, condition=${!_useNativeScheduling && isPlaying}');
+    // Timer: useNative=$_useNativeScheduling playing=$isPlaying
     if (!_useNativeScheduling && isPlaying) {
       // iOS LOOP CYCLE TRACKING: Clear processed events when beat wraps around the loop
       if (isLooping) {
@@ -581,13 +581,13 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         final previousBeat = _lastProcessedBeat ?? 0.0;
         final hasWrapped = nativeBeat < previousBeat || (previousBeat < stepCount && nativeBeat >= stepCount);
         
-        print('[iOS-LOOP-CALC] beat=${nativeBeat.toStringAsFixed(3)} prev=${previousBeat.toStringAsFixed(3)} stepCount=$stepCount wrapped=$hasWrapped');
+        // iOS loop calculation debug (disabled for performance)
         
         if (hasWrapped) {
           final clearedCount = _processedEvents.length;
           final clearedLastSent = _lastSentUs.length;
           _loopCycle++;
-          print('[iOS-LOOP] WRAP DETECTED: cycle -> $_loopCycle at beat ${nativeBeat.toStringAsFixed(2)} - clearing $clearedCount processed events and $clearedLastSent timing guards');
+          // Loop wrap detected - cache cleared for continuity
           _processedEvents.clear(); // Allow events to retrigger on new loop cycle
           _lastSentUs.clear(); // Also clear timing guards
         }
@@ -629,14 +629,14 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   
   void _processEventsAtBeat(double currentBeat) {
     // SURGICAL DEBUG: Track Dart event processing
-    print('[DART-EVENTS] _processEventsAtBeat called with currentBeat=$currentBeat, isPlaying=$isPlaying, tracks=${tracks.length}');
+    // Processing Dart events for beat $currentBeat
     
     // CRITICAL FIX: iOS loop audio requires active Dart-side event processing
     // This was disabled as "no-op" causing loop audio to disappear after first cycle
     
     // PERFORMANCE OPTIMIZATION: Use pre-computed event timeline instead of scanning all events
     _ensureEventTimeline();
-    print('[DART-EVENTS] Event timeline has ${_eventTimeline.length} events');
+    // Event timeline contains ${_eventTimeline.length} events
     
     // LOOKAHEAD SCHEDULING: Process events slightly ahead of time to reduce FFI latency
     final lookaheadMs = 5.0; // 5ms lookahead for professional timing
@@ -648,7 +648,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     
     // OPTIMIZED: Process only events in current time window using binary search
     final eventsToProcess = _getEventsInTimeWindow(scheduleWindowStart, scheduleWindowEnd, currentBeat);
-    print('[WINDOW-DEBUG] currentBeat=${currentBeat.toStringAsFixed(3)} window=${scheduleWindowStart.toStringAsFixed(3)}-${scheduleWindowEnd.toStringAsFixed(3)} found=${eventsToProcess.length} events');
+    // Scheduling window: ${eventsToProcess.length} events found
     
     for (final scheduledEvent in eventsToProcess) {
       final event = scheduledEvent.event;
@@ -666,7 +666,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       final withinGuard = (nowUs - lastUs) < _minRetriggerUs;
       final isProcessed = _processedEvents.contains(eventKey);
       
-      print('[EVENT-DEBUG] beat=${effectiveBeat.toStringAsFixed(3)} key=$eventKey processed=$isProcessed guard=$withinGuard');
+      // Event at beat ${effectiveBeat.toStringAsFixed(3)}: processed=$isProcessed
       
       if (!isProcessed && !withinGuard) {
         _processedEvents.add(eventKey);
@@ -674,7 +674,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         // SEND log for verification at loop start
         final stepNumber = stepIndex;
         if (DEBUG_SEQUENCER_LOGS && stepNumber == 0 && (event.midiStatus & 0xF0) == 0x90 && event.midiData2 > 0) {
-          print('[SEND] loopCycle=${_loopCycle} track=${track.id} step=0 beat=${effectiveBeat.toStringAsFixed(3)} note=${event.midiData1}');
+          // Sent: track=${track.id} note=${event.midiData1} at ${effectiveBeat.toStringAsFixed(3)}
         }
         
         NativeBridge.handleEventsNow(
@@ -904,13 +904,83 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     _tracksDirty[trackId] = true;
     _timelineNeedsRebuild = true;
     
-    // REAL-TIME EDITING FIX: Immediately rebuild timeline and clear processed events
-    // This ensures new sounds added during playback are heard without stop/restart
+    // ANDROID FIX: Re-schedule events to native buffer for real-time editing
     if (isPlaying) {
-      _ensureEventTimeline(); // Force immediate rebuild
-      _processedEvents.clear(); // Clear processed events cache to allow new events
-      _lastSentUs.clear(); // Clear timing guards for immediate playback
-      print('[REAL-TIME] Timeline rebuilt and event cache cleared for immediate playback');
+      if (Platform.isAndroid && _useNativeScheduling) {
+        // Android uses native scheduling - must re-send events to native buffer
+        _rescheduleTrackForAndroid(trackId);
+      } else {
+        // iOS uses Dart scheduling - just clear caches
+        _processedEvents.clear();
+        _lastSentUs.clear();
+      }
+    }
+  }
+  
+  void _rescheduleTrackForAndroid(int trackId) {
+    // Find the track
+    final track = tracks.firstWhere((t) => t.id == trackId, orElse: () => tracks.first);
+    final stepSequencerState = trackStepSequencerStates[trackId];
+    if (stepSequencerState == null) return;
+    
+    // Clear the native buffer for this track
+    track.clearBuffer();
+    
+    // Get current playback position
+    final currentBeat = sequence.getBeat();
+    final currentTempo = sequence.getTempo();
+    final noteDuration = _calculateNoteDuration(currentTempo);
+    
+    // Collect new events
+    List<SchedulerEvent> eventsToSchedule = [];
+    
+    stepSequencerState.iterateEvents((step, noteNumber, velocity) {
+      if (step < stepCount && velocity > 0) {
+        final beat = step.toDouble();
+        final midiVelocity = (velocity * 127).round().clamp(1, 127);
+        
+        if (isLooping) {
+          // For looping: schedule all events (they'll loop automatically)
+          eventsToSchedule.add(MidiEvent(
+            beat: beat,
+            midiStatus: 0x90,
+            midiData1: noteNumber,
+            midiData2: midiVelocity,
+          ));
+          
+          eventsToSchedule.add(MidiEvent(
+            beat: beat + noteDuration,
+            midiStatus: 0x80,
+            midiData1: noteNumber,
+            midiData2: 0,
+          ));
+        } else {
+          // For linear playback: only schedule future events
+          if (beat >= currentBeat) {
+            eventsToSchedule.add(MidiEvent(
+              beat: beat,
+              midiStatus: 0x90,
+              midiData1: noteNumber,
+              midiData2: midiVelocity,
+            ));
+            
+            eventsToSchedule.add(MidiEvent(
+              beat: beat + noteDuration,
+              midiStatus: 0x80,
+              midiData1: noteNumber,
+              midiData2: 0,
+            ));
+          }
+        }
+      }
+    });
+    
+    // Re-schedule events to native buffer
+    if (eventsToSchedule.isNotEmpty) {
+      // Sync the track buffer with the new events
+      track.clearEvents();
+      track.events.addAll(eventsToSchedule);
+      track.syncBuffer();
     }
   }
   
@@ -1625,7 +1695,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       return; // Timeline is up to date
     }
     
-    print('[TIMELINE-REBUILD] Rebuilding event timeline: needsRebuild=$_timelineNeedsRebuild, stepCount=$stepCount->$_lastTimelineStepCount, tempo=${tempo.toStringAsFixed(1)}->${_lastTimelineTempo.toStringAsFixed(1)}');
+    // Timeline rebuild: ${_eventTimeline.length} events generated
     
     // Performance: Rebuilding event timeline
     _eventTimeline.clear();
@@ -1661,7 +1731,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   List<ScheduledEvent> _getEventsInTimeWindow(double windowStart, double windowEnd, double currentBeat) {
     final eventsToProcess = <ScheduledEvent>[];
     
-    print('[WINDOW-SEARCH] Searching ${_eventTimeline.length} events for window ${windowStart.toStringAsFixed(3)}-${windowEnd.toStringAsFixed(3)} isLooping=$isLooping stepCount=$stepCount');
+    // Searching ${_eventTimeline.length} events for scheduling window
     
     for (final scheduledEvent in _eventTimeline) {
       final eventBeat = scheduledEvent.originalBeat;
@@ -1674,7 +1744,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
           final candidate = eventBeat + k * stepCount;
           if (candidate >= windowStart && candidate <= windowEnd) {
             effectiveBeat = candidate;
-            print('[WINDOW-MATCH] Loop: original=${eventBeat.toStringAsFixed(3)} candidate=${candidate.toStringAsFixed(3)} track=${scheduledEvent.track.id}');
+            // Loop match: beat=${eventBeat.toStringAsFixed(3)} track=${scheduledEvent.track.id}
             break;
           }
         }
@@ -1686,7 +1756,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
           continue;
         }
         effectiveBeat = eventBeat;
-        print('[WINDOW-MATCH] Linear: beat=${eventBeat.toStringAsFixed(3)} track=${scheduledEvent.track.id}');
+        // Linear match: beat=${eventBeat.toStringAsFixed(3)} track=${scheduledEvent.track.id}
       }
       
       // Create processed event with effective beat
