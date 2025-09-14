@@ -904,10 +904,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     _tracksDirty[trackId] = true;
     _timelineNeedsRebuild = true;
     
-    // ANDROID FIX: Re-schedule events to native buffer for real-time editing
+    // CROSS-PLATFORM REAL-TIME EDITING FIX
     if (isPlaying) {
-      if (Platform.isAndroid && _useNativeScheduling) {
-        // Android uses native scheduling - must re-send events to native buffer
+      if (Platform.isAndroid) {
+        // Android always needs track buffer re-sync regardless of scheduling mode
         _rescheduleTrackForAndroid(trackId);
       } else {
         // iOS uses Dart scheduling - just clear caches
