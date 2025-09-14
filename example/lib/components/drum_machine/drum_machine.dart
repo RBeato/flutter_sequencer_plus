@@ -50,6 +50,7 @@ class _DrumMachineWidgetState extends State<DrumMachineWidget>
   }
 
   void handleVelocityChange(int col, int step, double velocity) {
+    print('[DEBUG-VELOCITY-CHANGE] handleVelocityChange called: trackId=${widget.track.id}, col=$col, step=$step, velocity=$velocity');
     widget.handleVelocitiesChange(
         widget.track.id, step, widget.columnPitches[col], velocity);
   }

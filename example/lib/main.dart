@@ -572,29 +572,35 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       position = nativeBeat;
     });
     
-    // iOS DART SCHEDULING: Process events in Dart since native bridge rejects events
-    // Timer: useNative=$_useNativeScheduling playing=$isPlaying
-    if (!_useNativeScheduling && isPlaying) {
-      // iOS LOOP CYCLE TRACKING: Clear processed events when beat wraps around the loop
-      if (isLooping) {
-        // For pure Dart looping, detect when we cross loop boundaries
-        final previousBeat = _lastProcessedBeat ?? 0.0;
-        final hasWrapped = nativeBeat < previousBeat || (previousBeat < stepCount && nativeBeat >= stepCount);
+    // CROSS-PLATFORM LOOP CYCLE TRACKING: Track loop wraps for UI counter
+    if (isLooping && isPlaying) {
+      // For looping, detect when we cross loop boundaries
+      final previousBeat = _lastProcessedBeat ?? 0.0;
+      
+      // IMPROVED WRAP DETECTION: More robust logic for detecting loop boundaries
+      // Check if we've wrapped around (current beat is much smaller than previous)
+      final significantBackward = previousBeat > 0.1 && nativeBeat < (previousBeat - 0.5);
+      // Check if we've crossed the step count boundary
+      final crossedBoundary = (previousBeat >= (stepCount - 0.1)) && (nativeBeat <= 0.5);
+      final hasWrapped = significantBackward || crossedBoundary;
+      
+      if (hasWrapped) {
+        _loopCycle++;
+        print('[LOOP-COUNTER] Loop wrap detected! Previous: $previousBeat, Current: $nativeBeat, Loop: $_loopCycle (Android: ${Platform.isAndroid})');
         
-        // iOS loop calculation debug (disabled for performance)
-        
-        if (hasWrapped) {
-          final clearedCount = _processedEvents.length;
-          final clearedLastSent = _lastSentUs.length;
-          _loopCycle++;
-          // Loop wrap detected - cache cleared for continuity
+        // For iOS Dart scheduling, also clear caches
+        if (!_useNativeScheduling) {
           _processedEvents.clear(); // Allow events to retrigger on new loop cycle
           _lastSentUs.clear(); // Also clear timing guards
         }
-        
-        _lastProcessedBeat = nativeBeat;
       }
       
+      _lastProcessedBeat = nativeBeat;
+    }
+    
+    // iOS DART SCHEDULING: Process events in Dart since native bridge rejects events
+    // Timer: useNative=$_useNativeScheduling playing=$isPlaying
+    if (!_useNativeScheduling && isPlaying) {
       _processEventsAtBeat(nativeBeat);
     }
     
@@ -701,6 +707,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       isPaused = false;
     });
     _pausedAtBeat = 0.0;
+    _loopCycle = 0; // Reset loop counter
     sequence.stop();
     
     // PERFORMANCE: Sync all tracks efficiently
@@ -809,7 +816,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
 
   handleVelocitiesChange(
       int trackId, int step, int noteNumber, double velocity) {
-    print('[DEBUG] Velocity change: trackId=$trackId step=$step noteNumber=$noteNumber velocity=$velocity');
+    print('[DEBUG-HANDLE-VELOCITIES] handleVelocitiesChange called: trackId=$trackId step=$step noteNumber=$noteNumber velocity=$velocity isPlaying=$isPlaying');
     final track = tracks.firstWhere((track) => track.id == trackId);
 
     trackStepSequencerStates[trackId]!.setVelocity(step, noteNumber, velocity);
@@ -904,6 +911,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     _tracksDirty[trackId] = true;
     _timelineNeedsRebuild = true;
     
+    print('[DEBUG-MARK-DIRTY] markTrackDirty called: trackId=$trackId, isPlaying=$isPlaying, Platform.isAndroid=${Platform.isAndroid}');
+    
     // CROSS-PLATFORM REAL-TIME EDITING FIX
     if (isPlaying) {
       if (Platform.isAndroid) {
@@ -915,76 +924,187 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         _processedEvents.clear();
         _lastSentUs.clear();
       }
+    } else {
+      print('[DEBUG-MARK-DIRTY] Not calling real-time editing because isPlaying=false');
     }
   }
   
   void _rescheduleTrackForAndroid(int trackId) {
-    print('[ANDROID-REALTIME] _rescheduleTrackForAndroid START for track $trackId');
+    print('[ANDROID-REALTIME] === REAL-TIME EDITING DEBUG START ===');
+    print('[ANDROID-REALTIME] Track: $trackId, Platform: ${Platform.isAndroid ? "Android" : "iOS"}');
     
     // Find the track
     final track = tracks.firstWhere((t) => t.id == trackId, orElse: () => tracks.first);
     final stepSequencerState = trackStepSequencerStates[trackId];
     if (stepSequencerState == null) {
-      print('[ANDROID-REALTIME] stepSequencerState is null for track $trackId - ABORTING');
+      print('[ANDROID-REALTIME] ERROR: stepSequencerState is null - ABORTING');
       return;
     }
     
-    // Clear the native buffer for this track
-    print('[ANDROID-REALTIME] Clearing buffer for track $trackId');
-    track.clearBuffer();
-    
-    // Get current playback position
+    // DETAILED PLAYBACK STATE
     final currentBeat = sequence.getBeat();
     final currentTempo = sequence.getTempo();
     final noteDuration = _calculateNoteDuration(currentTempo);
+    final isPlayingNow = sequence.getIsPlaying();
+    final sequencePosition = sequence.getBeat();
+    final loopState = sequence.loopState;
     
-    print('[ANDROID-REALTIME] currentBeat=$currentBeat, tempo=$currentTempo, isLooping=$isLooping');
+    print('[ANDROID-REALTIME] === PLAYBACK STATE ===');
+    print('[ANDROID-REALTIME] isPlaying: $isPlayingNow, isLooping: $isLooping');
+    print('[ANDROID-REALTIME] currentBeat: $currentBeat, sequencePosition: $sequencePosition');
+    print('[ANDROID-REALTIME] tempo: $currentTempo, noteDuration: $noteDuration');
+    print('[ANDROID-REALTIME] stepCount: $stepCount, loopState: $loopState');
     
-    // Collect new events
-    List<SchedulerEvent> eventsToSchedule = [];
+    // Count current events before any changes
+    int currentEventCount = 0;
+    stepSequencerState.iterateEvents((step, noteNumber, velocity) {
+      if (step < stepCount && velocity > 0) {
+        currentEventCount++;
+      }
+    });
+    
+    print('[ANDROID-REALTIME] === CURRENT GRID STATE ===');
+    print('[ANDROID-REALTIME] Active cells in grid: $currentEventCount');
+    
+    // Store existing events for comparison
+    final existingEvents = List<SchedulerEvent>.from(track.events);
+    print('[ANDROID-REALTIME] Existing events in track: ${existingEvents.length}');
+    
+    // Build new event list with detailed logging
+    List<SchedulerEvent> trackEvents = [];
+    int scheduledCount = 0;
+    int skippedCount = 0;
     
     stepSequencerState.iterateEvents((step, noteNumber, velocity) {
       if (step < stepCount && velocity > 0) {
         final beat = step.toDouble();
         final midiVelocity = (velocity * 127).round().clamp(1, 127);
         
-        // Always schedule ALL events for looping, or future events for linear playback
-        final shouldSchedule = isLooping || beat >= currentBeat;
+        // Detailed scheduling decision
+        final shouldSchedule = isLooping ? true : beat >= currentBeat;
+        final futureEvent = beat >= currentBeat;
+        final pastEvent = beat < currentBeat;
+        
+        print('[ANDROID-REALTIME] Step $step (beat $beat): velocity=$velocity, note=$noteNumber');
+        print('[ANDROID-REALTIME]   currentBeat=$currentBeat, futureEvent=$futureEvent, pastEvent=$pastEvent');
+        print('[ANDROID-REALTIME]   shouldSchedule=$shouldSchedule (isLooping=$isLooping)');
         
         if (shouldSchedule) {
-          eventsToSchedule.add(MidiEvent(
+          // LOOP BOUNDARY FIX: In loop mode, ensure note-off doesn't extend beyond loop end
+          final maxNoteDuration = isLooping ? (stepCount.toDouble() - beat) : noteDuration;
+          final actualNoteDuration = dart_math.min(noteDuration, maxNoteDuration.clamp(0.1, noteDuration));
+          final noteOffBeat = beat + actualNoteDuration;
+          
+          trackEvents.add(MidiEvent(
             beat: beat,
             midiStatus: 0x90,
             midiData1: noteNumber,
             midiData2: midiVelocity,
           ));
           
-          eventsToSchedule.add(MidiEvent(
-            beat: beat + noteDuration,
+          trackEvents.add(MidiEvent(
+            beat: noteOffBeat,
             midiStatus: 0x80,
             midiData1: noteNumber,
             midiData2: 0,
           ));
           
-          print('[ANDROID-REALTIME] Scheduled event at beat $beat (currentBeat=$currentBeat, isLooping=$isLooping)');
+          print('[ANDROID-REALTIME]   → SCHEDULED: NoteOn at $beat, NoteOff at $noteOffBeat (clamped from ${beat + noteDuration}, loop=${isLooping})');
         } else {
-          print('[ANDROID-REALTIME] Skipped past event at beat $beat (currentBeat=$currentBeat)');
+          print('[ANDROID-REALTIME]   → SKIPPED: Past event in linear mode');
         }
+        
+        // IMMEDIATE PLAYBACK FIX: If user just added this note, play it immediately
+        // instead of waiting for the next loop iteration
+        if (shouldSchedule && isLooping) {
+          final loopLength = stepCount.toDouble();
+          final currentLoopBeat = currentBeat % loopLength;
+          final eventLoopBeat = beat % loopLength;
+          
+          // If the event beat is coming up soon in the current loop (within next 0.5 beats)
+          // OR if we just passed it (within last 0.2 beats), play it immediately
+          final timeToEvent = eventLoopBeat - currentLoopBeat;
+          final justAdded = timeToEvent > -0.2 && timeToEvent < 0.5;
+          
+          if (justAdded) {
+            print('[ANDROID-REALTIME]   → IMMEDIATE: User just added note for beat $beat, playing now! (currentLoopBeat=$currentLoopBeat, eventLoopBeat=$eventLoopBeat, timeToEvent=$timeToEvent)');
+            
+            // Schedule immediate note-on (right now)
+            trackEvents.add(MidiEvent(
+              beat: currentBeat + 0.001, // Schedule almost immediately
+              midiStatus: 0x90,
+              midiData1: noteNumber,
+              midiData2: midiVelocity,
+            ));
+            
+            // And immediate note-off
+            final maxNoteDuration = isLooping ? (stepCount.toDouble() - beat) : noteDuration;
+            final immediateNoteDuration = dart_math.min(noteDuration, maxNoteDuration.clamp(0.1, noteDuration));
+            trackEvents.add(MidiEvent(
+              beat: currentBeat + 0.001 + immediateNoteDuration,
+              midiStatus: 0x80,
+              midiData1: noteNumber,
+              midiData2: 0,
+            ));
+          }
+        }
+        
+        scheduledCount++;
       }
     });
     
-    // Re-schedule events to native buffer
-    print('[ANDROID-REALTIME] Found ${eventsToSchedule.length} events to reschedule');
-    if (eventsToSchedule.isNotEmpty) {
-      // Sync the track buffer with the new events
+    print('[ANDROID-REALTIME] === EVENT SCHEDULING SUMMARY ===');
+    print('[ANDROID-REALTIME] Total cells with sound: $currentEventCount');
+    print('[ANDROID-REALTIME] Events scheduled: $scheduledCount');
+    print('[ANDROID-REALTIME] Events skipped: $skippedCount');
+    print('[ANDROID-REALTIME] Total MIDI events created: ${trackEvents.length} (${trackEvents.length ~/ 2} note pairs)');
+    
+    // Check if events actually changed
+    final eventsChanged = trackEvents.length != existingEvents.length || !_eventsEqual(trackEvents, existingEvents);
+    print('[ANDROID-REALTIME] === BUFFER UPDATE DECISION ===');
+    print('[ANDROID-REALTIME] Events changed: $eventsChanged');
+    print('[ANDROID-REALTIME] Old count: ${existingEvents.length}, New count: ${trackEvents.length}');
+    
+    if (eventsChanged) {
+      print('[ANDROID-REALTIME] === UPDATING TRACK ===');
+      
+      // Update track events
       track.clearEvents();
-      track.events.addAll(eventsToSchedule);
-      print('[ANDROID-REALTIME] Added ${eventsToSchedule.length} events to track, calling syncBuffer()');
-      track.syncBuffer();
-      print('[ANDROID-REALTIME] syncBuffer() completed for track $trackId');
+      track.events.addAll(trackEvents);
+      print('[ANDROID-REALTIME] Track events updated: ${track.events.length} events');
+      
+      // Try different approaches for immediate playback
+      if (Platform.isAndroid && isPlayingNow) {
+        print('[ANDROID-REALTIME] === ATTEMPTING IMMEDIATE PLAYBACK ===');
+        
+        // CRITICAL FIX: Only use topOffBuffer to avoid disrupting other tracks
+        // The syncBuffer() call was interfering with other tracks' scheduled events
+        print('[ANDROID-REALTIME] Using topOffBuffer() only to preserve other tracks...');
+        track.topOffBuffer();
+        
+        print('[ANDROID-REALTIME] Real-time update completed - other tracks preserved');
+      } else {
+        print('[ANDROID-REALTIME] Skipping immediate playback: Platform.isAndroid=${Platform.isAndroid}, isPlaying=$isPlayingNow');
+      }
     } else {
-      print('[ANDROID-REALTIME] No events to reschedule for track $trackId');
+      print('[ANDROID-REALTIME] No changes detected - no buffer update needed');
     }
+    
+    print('[ANDROID-REALTIME] === REAL-TIME EDITING DEBUG END ===');
+  }
+  
+  // Helper method to compare event lists
+  bool _eventsEqual(List<SchedulerEvent> events1, List<SchedulerEvent> events2) {
+    if (events1.length != events2.length) return false;
+    for (int i = 0; i < events1.length; i++) {
+      final e1 = events1[i] as MidiEvent;
+      final e2 = events2[i] as MidiEvent;
+      if (e1.beat != e2.beat || e1.midiStatus != e2.midiStatus || 
+          e1.midiData1 != e2.midiData1 || e1.midiData2 != e2.midiData2) {
+        return false;
+      }
+    }
+    return true;
   }
   
   void syncTrack(Track track) {
@@ -1027,14 +1147,15 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     final eventCountChanged = (_trackEventCounts[trackId] ?? 0) != noteCount;
     if (eventCountChanged || wasTempoChange) {
       // Platform-specific buffer sync
-      if (_useNativeScheduling) {
-        // Android: sync to native buffer
-        track.syncBuffer();
+      track.syncBuffer();
+      
+      // REAL-TIME EDITING FIX: Use topOffBuffer during playback on Android for immediate event scheduling
+      // This follows the original flutter_sequencer architecture where topOffBuffer handles real-time events
+      if (Platform.isAndroid && isPlaying && eventCountChanged) {
         track.topOffBuffer();
-      } else {
-        // iOS: will use Dart dispatch, but still sync for consistency
-        track.syncBuffer();
+        print('[SYNC-TRACK] Android real-time: Used topOffBuffer for immediate event scheduling');
       }
+      
       _trackEventCounts[trackId] = noteCount;
       _timelineNeedsRebuild = true; // Mark timeline for rebuild
     }
@@ -1158,10 +1279,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
           track.changeVolumeNow(volume: 0.8); // Higher volume for better audibility
           // Ensure buffer is synced for both platforms
           track.syncBuffer();
-          if (_useNativeScheduling) {
-            // Android: also fill buffer for native scheduling
-            track.topOffBuffer();
-          }
         });
       });
       
@@ -1493,6 +1610,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
             onTogglePlayPause: handleTogglePlayPause,
             onStop: handleStop,
             onToggleLoop: handleToggleLoop,
+            loopCount: _loopCycle,
           ),
           PositionView(position: position),
         ]),

@@ -513,13 +513,32 @@ class Track {
     }
 
     print('[SCHEDULE-DEBUG] Track $id: About to schedule ${eventsToSync.length} events to NativeBridge.scheduleEvents');
-    final eventsSyncedCount = NativeBridge.scheduleEvents(
+    var eventsSyncedCount = NativeBridge.scheduleEvents(
         id,
         eventsToSync,
         sampleRate,
         tempo,
         sequence.engineStartFrame + frameOffset);
     print('[SCHEDULE-DEBUG] Track $id: NativeBridge.scheduleEvents returned eventsSyncedCount=$eventsSyncedCount');
+    
+    // ANDROID REAL-TIME EDITING FIX: If buffer is full during playback, clear old events and retry
+    if (eventsSyncedCount == 0 && eventsToSync.isNotEmpty && sequence.isPlaying && Platform.isAndroid) {
+      print('[ANDROID-BUFFER-FIX] Track $id: Buffer full during playback, clearing old events and retrying');
+      
+      // Clear events that are more than 1 second in the past to make room for new events
+      final currentFrame = NativeBridge.getPosition();
+      final clearBeforeFrame = currentFrame - (sampleRate * 1); // 1 second ago
+      NativeBridge.clearEvents(id, clearBeforeFrame);
+      
+      // Retry scheduling the events
+      eventsSyncedCount = NativeBridge.scheduleEvents(
+          id,
+          eventsToSync,
+          sampleRate,
+          tempo,
+          sequence.engineStartFrame + frameOffset);
+      print('[ANDROID-BUFFER-FIX] Track $id: After buffer clear, eventsSyncedCount=$eventsSyncedCount');
+    }
 
     if (eventsSyncedCount > 0) {
       final lastEvent = eventsToSync[eventsSyncedCount - 1];

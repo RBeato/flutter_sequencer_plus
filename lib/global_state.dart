@@ -228,6 +228,8 @@ class GlobalState {
 
   /// Refills the underlying sequencer engine's event buffer to full capacity.
   void _topOffAllBuffers() {
+    // Each track's topOffBuffer() method handles platform-specific logic
+    // iOS dart-dispatch mode will skip, Android will execute
     _getAllTracks().forEach((track) {
       track.topOffBuffer();
     });

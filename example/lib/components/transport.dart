@@ -8,6 +8,7 @@ class Transport extends StatelessWidget {
     required this.onTogglePlayPause,
     required this.onStop,
     required this.onToggleLoop,
+    this.loopCount = 0,
   }) : super(key: key);
 
   final bool isPlaying;
@@ -15,6 +16,7 @@ class Transport extends StatelessWidget {
   final Function() onTogglePlayPause;
   final Function() onStop;
   final Function() onToggleLoop;
+  final int loopCount;
 
   @override
   Widget build(BuildContext context) {
@@ -35,6 +37,24 @@ class Transport extends StatelessWidget {
           onPressed: onToggleLoop,
           color: isLooping ? Colors.pink : Colors.black54,
         ),
+        if (isLooping && isPlaying)
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            margin: EdgeInsets.only(left: 8),
+            decoration: BoxDecoration(
+              color: Colors.pink.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.pink, width: 1),
+            ),
+            child: Text(
+              'Loop: $loopCount',
+              style: TextStyle(
+                color: Colors.pink,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
       ],
     );
   }
