@@ -1167,11 +1167,13 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       // Platform-specific buffer sync
       track.syncBuffer();
       
-      // REAL-TIME EDITING FIX: Use topOffBuffer during playback on Android for immediate event scheduling
-      // This follows the original flutter_sequencer architecture where topOffBuffer handles real-time events
+      // REAL-TIME EDITING FIX: Force complete buffer clear and resync for Android during playback
+      // This ensures new events are properly scheduled without buffer conflicts
       if (Platform.isAndroid && isPlaying && eventCountChanged) {
-        track.topOffBuffer();
-        print('[SYNC-TRACK] Android real-time: Used topOffBuffer for immediate event scheduling');
+        // Clear the entire track buffer and force complete resync
+        track.clearBuffer();
+        track.syncBuffer();
+        print('[SYNC-TRACK] Android real-time: Cleared buffer and forced complete resync for immediate event scheduling');
 
         // Also clear timeline cache to ensure new events are processed
         _timelineNeedsRebuild = true;
