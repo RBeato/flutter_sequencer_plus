@@ -162,6 +162,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   double _playbackStartBeat = 0.0;
   double? _lastNativePosition;
   
+  // RACE CONDITION PREVENTION: Track rapid editing to prevent clearEvents() conflicts
+  Map<int, int> _lastLightweightSync = {};
+  static const int _rapidEditingThresholdMs = 500; // 500ms window for rapid editing detection
+  
   // Available sound instruments (SF2 + SFZ + AudioUnit)
   final List<Map<String, String>> _availableSoundFonts = [
     {'name': 'J Piano', 'path': 'assets/sf2/j_piano.sf2', 'type': 'sf2'},
@@ -699,7 +703,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     print('[DEBUG] handleStop called');
     _stopSimplePlayback();
     // Don't clear processed events - let loop-aware deduplication handle it
-    
+
     // Reset position to step 0 and clear pause state
     setState(() {
       position = 0.0;
@@ -709,13 +713,21 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     _pausedAtBeat = 0.0;
     _loopCycle = 0; // Reset loop counter
     sequence.stop();
-    
-    // PERFORMANCE: Sync all tracks efficiently
+
+    // PERFORMANCE: Sync all tracks efficiently (but only if they have events)
     for (final track in tracks) {
       markTrackDirty(track.id);
-      syncTrack(track);
+
+      // Only sync tracks that actually have events to avoid unnecessary processing
+      final hasEvents = _trackHasEvents(track.id);
+      if (hasEvents) {
+        syncTrack(track);
+        print('[SYNC-EFFICIENT] Synced track ${track.id} (has events)');
+      } else {
+        print('[SYNC-EFFICIENT] Skipped track ${track.id} (no events)');
+      }
     }
-    print('[DEBUG] Position reset to 0.0, pause state cleared, all tracks synced after stopping');
+    print('[DEBUG] Position reset to 0.0, pause state cleared, efficient track sync completed');
   }
   
   @override
@@ -816,15 +828,93 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
 
   handleVelocitiesChange(
       int trackId, int step, int noteNumber, double velocity) {
-    print('[DEBUG-HANDLE-VELOCITIES] handleVelocitiesChange called: trackId=$trackId step=$step noteNumber=$noteNumber velocity=$velocity isPlaying=$isPlaying');
+    print('\n🎵 === HANDLE VELOCITIES CHANGE ===');
+    print('🎵 INPUT: trackId=$trackId, step=$step, noteNumber=$noteNumber, velocity=$velocity');
+    print('🎵 STATE: isPlaying=$isPlaying, Platform.isAndroid=${Platform.isAndroid}');
+    print('🎵 CURRENT SELECTED TRACK: ${selectedTrack?.id} (requesting trackId=$trackId)');
+
     final track = tracks.firstWhere((track) => track.id == trackId);
 
     trackStepSequencerStates[trackId]!.setVelocity(step, noteNumber, velocity);
+    print('🎵 ✅ Updated Dart state for trackId=$trackId');
 
-    // PERFORMANCE: Mark track dirty and sync efficiently
-    markTrackDirty(trackId);
-    syncTrack(track);
-    print('[DEBUG] Track marked dirty and synced for real-time editing');
+    // Debug: Print current events for this track
+    print('🎵 DEBUG: Current events for track $trackId:');
+    trackStepSequencerStates[trackId]!.iterateEvents((step, noteNumber, velocity) {
+      print('🎵   Step $step: note=$noteNumber, vel=$velocity');
+    });
+
+    // PERFORMANCE: Mark track dirty with specific note info for immediate playback
+    markTrackDirty(trackId, newStep: step, newNoteNumber: noteNumber, newVelocity: velocity);
+    print('🎵 ✅ Marked track $trackId as dirty');
+    
+    // HYBRID ANDROID REAL-TIME EDITING: Immediate feedback + proper event scheduling
+    if (Platform.isAndroid && isPlaying) {
+      print('🎵 ⚡ ANDROID REAL-TIME PATH: Using immediate event processing...');
+      // Use a new real-time safe approach that handles both adding and removing
+      _addEventRealTime(track, step, noteNumber, velocity);
+      print('🎵 ⚡ ANDROID REAL-TIME PATH: Completed real-time event processing');
+    } else {
+      print('🎵 📱 STANDARD PATH: Using full sync...');
+      syncTrack(track);
+      print('🎵 📱 STANDARD PATH: Completed full sync');
+    }
+    print('🎵 === END HANDLE VELOCITIES CHANGE ===\n');
+  }
+
+  /// Real-time safe event addition for Android during playback
+  /// Adds events without disrupting the currently playing sequence
+  void _addEventRealTime(Track track, int step, int noteNumber, double velocity) {
+    final currentTempo = sequence.getTempo();
+    final noteDuration = _calculateNoteDuration(currentTempo);
+    final beat = step.toDouble();
+
+    print('[REAL-TIME] Processing event: step=$step, note=$noteNumber, vel=$velocity, beat=$beat');
+
+    if (velocity > 0) {
+      // Adding a note
+      print('[REAL-TIME] Adding note to track');
+
+      // ANDROID FIX: For real-time addition during playback, we need to:
+      // 1. Add the note to the track (for future loops)
+      // 2. Force a complete sync to ensure native scheduling picks it up
+      // 3. Provide immediate feedback
+
+      track.addNote(
+        noteNumber: noteNumber,
+        velocity: velocity,
+        startBeat: beat,
+        durationBeats: noteDuration,
+      );
+
+      // CRITICAL: Force a complete track sync for Android native scheduling
+      // This ensures the new event is properly scheduled in the native engine
+      print('[REAL-TIME] Forcing complete track sync for native scheduling');
+      syncTrack(track);
+
+      // Provide immediate audio feedback for the current cycle
+      track.startNoteNow(noteNumber: noteNumber, velocity: velocity);
+
+      // Auto-stop the immediate feedback after a short duration
+      Future.delayed(Duration(milliseconds: 300), () {
+        track.stopNoteNow(noteNumber: noteNumber);
+      });
+
+      print('[REAL-TIME] Note added, synced to native engine, and immediate feedback provided');
+    } else {
+      // Removing a note - we need to clear and rebuild the track events
+      print('[REAL-TIME] Removing note - rebuilding track events');
+
+      // Stop any currently playing instance of this note
+      track.stopNoteNow(noteNumber: noteNumber);
+
+      // For note removal, we always need to sync the track completely
+      // since we can't remove individual events from the native engine
+      print('[REAL-TIME] Forcing complete track sync for note removal');
+      syncTrack(track);
+
+      print('[REAL-TIME] Note removal completed with full sync');
+    }
   }
 
   /// Calculate note duration based on tempo
@@ -833,11 +923,11 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     // Base duration: 1 beat at 120 BPM
     const double baseTempo = 120.0;
     const double baseDuration = 1.6; // Double the previous duration (was 0.8)
-    
+
     // Scale duration inversely with tempo
     // Faster tempo = shorter notes for tighter feel
     double tempoDuration = (baseTempo / tempo) * baseDuration;
-    
+
     // Clamp to reasonable range: 0.2 to 1.8 beats (doubled from 0.1-0.9)
     return tempoDuration.clamp(0.2, 1.8);
   }
@@ -885,10 +975,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       
       if (eventsToSchedule.isNotEmpty) {
         // Pre-schedule all events for this track in the native buffer
-        final eventsSynced = NativeBridge.scheduleEvents(
+        NativeBridge.scheduleEvents(
           trackId,
           eventsToSchedule,
-          sampleRate, 
+          sampleRate,
           currentTempo,
           0, // Frame offset (start immediately)
         );
@@ -907,206 +997,134 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   final Map<int, int> _trackEventCounts = {};
   final Map<int, double> _trackLastSyncTempo = {};
   
-  void markTrackDirty(int trackId) {
+  void markTrackDirty(int trackId, {int? newStep, int? newNoteNumber, double? newVelocity}) {
     _tracksDirty[trackId] = true;
     _timelineNeedsRebuild = true;
     
-    print('[DEBUG-MARK-DIRTY] markTrackDirty called: trackId=$trackId, isPlaying=$isPlaying, Platform.isAndroid=${Platform.isAndroid}');
+    print('[DEBUG-MARK-DIRTY] markTrackDirty called: trackId=$trackId, newStep=$newStep, newNote=$newNoteNumber, newVelocity=$newVelocity, isPlaying=$isPlaying, Platform.isAndroid=${Platform.isAndroid}');
+    
+    // ANDROID REAL-TIME EDITING: Handle both note addition and removal
+    if (isPlaying && Platform.isAndroid && newStep != null && newNoteNumber != null && newVelocity != null) {
+      final track = tracks.firstWhere((t) => t.id == trackId, orElse: () => tracks.first);
+
+      if (newVelocity > 0) {
+        // Adding a note - provide immediate feedback
+        print('[ANDROID-REAL-TIME] Adding note with immediate feedback: note=$newNoteNumber, velocity=$newVelocity');
+        track.startNoteNow(noteNumber: newNoteNumber, velocity: newVelocity);
+
+        // Auto-stop after reasonable duration
+        Future.delayed(Duration(milliseconds: 200), () {
+          track.stopNoteNow(noteNumber: newNoteNumber);
+        });
+      } else {
+        // Removing a note - stop any playing instances immediately
+        print('[ANDROID-REAL-TIME] Removing note: note=$newNoteNumber');
+        track.stopNoteNow(noteNumber: newNoteNumber);
+      }
+    }
     
     // CROSS-PLATFORM REAL-TIME EDITING FIX
     if (isPlaying) {
       if (Platform.isAndroid) {
-        // Android always needs track buffer re-sync regardless of scheduling mode
-        print('[ANDROID-REALTIME] Calling _rescheduleTrackForAndroid for track $trackId');
-        _rescheduleTrackForAndroid(trackId);
+        // Android uses hybrid approach: immediate feedback + track sync
+        print('[ANDROID-HYBRID] Using hybrid approach - immediate feedback + track sync');
+
+        // Clear timeline cache for immediate event processing
+        _timelineNeedsRebuild = true;
       } else {
         // iOS uses Dart scheduling - just clear caches
         _processedEvents.clear();
         _lastSentUs.clear();
+        print('[iOS-HYBRID] Cleared event caches for immediate processing');
       }
     } else {
       print('[DEBUG-MARK-DIRTY] Not calling real-time editing because isPlaying=false');
     }
   }
   
-  void _rescheduleTrackForAndroid(int trackId) {
-    print('[ANDROID-REALTIME] === REAL-TIME EDITING DEBUG START ===');
-    print('[ANDROID-REALTIME] Track: $trackId, Platform: ${Platform.isAndroid ? "Android" : "iOS"}');
+  // RAPID EDITING DETECTION: Prevents clearEvents() race conditions during fast UI interaction
+  bool _isRapidEditing(int trackId) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final lastSync = _lastLightweightSync[trackId] ?? 0;
+    final timeSinceLastSync = now - lastSync;
     
-    // Find the track
-    final track = tracks.firstWhere((t) => t.id == trackId, orElse: () => tracks.first);
-    final stepSequencerState = trackStepSequencerStates[trackId];
-    if (stepSequencerState == null) {
-      print('[ANDROID-REALTIME] ERROR: stepSequencerState is null - ABORTING');
-      return;
-    }
+    bool isRapid = timeSinceLastSync < _rapidEditingThresholdMs;
+    print('[DEBUG-RAPID] Track $trackId: timeSince=${timeSinceLastSync}ms, isRapid=$isRapid');
     
-    // DETAILED PLAYBACK STATE
-    final currentBeat = sequence.getBeat();
-    final currentTempo = sequence.getTempo();
-    final noteDuration = _calculateNoteDuration(currentTempo);
-    final isPlayingNow = sequence.getIsPlaying();
-    final sequencePosition = sequence.getBeat();
-    final loopState = sequence.loopState;
+    return isRapid;
+  }
+  
+  // COMPREHENSIVE DIAGNOSTIC TEST SYSTEM
+  void _runDiagnosticTest(Track track, int trackId, String context) {
+    print('\n🔍 === COMPREHENSIVE DIAGNOSTIC TEST: $context ===');
     
-    print('[ANDROID-REALTIME] === PLAYBACK STATE ===');
-    print('[ANDROID-REALTIME] isPlaying: $isPlayingNow, isLooping: $isLooping');
-    print('[ANDROID-REALTIME] currentBeat: $currentBeat, sequencePosition: $sequencePosition');
-    print('[ANDROID-REALTIME] tempo: $currentTempo, noteDuration: $noteDuration');
-    print('[ANDROID-REALTIME] stepCount: $stepCount, loopState: $loopState');
+    // 1. Check state consistency
+    final stateEventCount = _countStateEvents(trackId);
+    final trackEventCount = _countTrackEvents(track);
     
-    // Count current events before any changes
-    int currentEventCount = 0;
-    stepSequencerState.iterateEvents((step, noteNumber, velocity) {
-      if (step < stepCount && velocity > 0) {
-        currentEventCount++;
-      }
-    });
+    print('🔍 STATE ANALYSIS:');
+    print('  - Dart state events: $stateEventCount');
+    print('  - Native track events: $trackEventCount');
+    print('  - State consistent: ${stateEventCount == trackEventCount}');
     
-    print('[ANDROID-REALTIME] === CURRENT GRID STATE ===');
-    print('[ANDROID-REALTIME] Active cells in grid: $currentEventCount');
-    
-    // Store existing events for comparison
-    final existingEvents = List<SchedulerEvent>.from(track.events);
-    print('[ANDROID-REALTIME] Existing events in track: ${existingEvents.length}');
-    
-    // Build new event list with detailed logging
-    List<SchedulerEvent> trackEvents = [];
-    int scheduledCount = 0;
-    int skippedCount = 0;
-    
-    stepSequencerState.iterateEvents((step, noteNumber, velocity) {
+    // 2. Check specific events in state
+    print('🔍 DART STATE EVENTS:');
+    trackStepSequencerStates[trackId]!.iterateEvents((step, noteNumber, velocity) {
       if (step < stepCount && velocity > 0) {
         final beat = step.toDouble();
-        final midiVelocity = (velocity * 127).round().clamp(1, 127);
-        
-        // Detailed scheduling decision
-        final shouldSchedule = isLooping ? true : beat >= currentBeat;
-        final futureEvent = beat >= currentBeat;
-        final pastEvent = beat < currentBeat;
-        
-        print('[ANDROID-REALTIME] Step $step (beat $beat): velocity=$velocity, note=$noteNumber');
-        print('[ANDROID-REALTIME]   currentBeat=$currentBeat, futureEvent=$futureEvent, pastEvent=$pastEvent');
-        print('[ANDROID-REALTIME]   shouldSchedule=$shouldSchedule (isLooping=$isLooping)');
-        
-        if (shouldSchedule) {
-          // LOOP BOUNDARY FIX: In loop mode, ensure note-off doesn't extend beyond loop end
-          final maxNoteDuration = isLooping ? (stepCount.toDouble() - beat) : noteDuration;
-          final actualNoteDuration = dart_math.min(noteDuration, maxNoteDuration.clamp(0.1, noteDuration));
-          final noteOffBeat = beat + actualNoteDuration;
-          
-          trackEvents.add(MidiEvent(
-            beat: beat,
-            midiStatus: 0x90,
-            midiData1: noteNumber,
-            midiData2: midiVelocity,
-          ));
-          
-          trackEvents.add(MidiEvent(
-            beat: noteOffBeat,
-            midiStatus: 0x80,
-            midiData1: noteNumber,
-            midiData2: 0,
-          ));
-          
-          print('[ANDROID-REALTIME]   → SCHEDULED: NoteOn at $beat, NoteOff at $noteOffBeat (clamped from ${beat + noteDuration}, loop=${isLooping})');
-        } else {
-          print('[ANDROID-REALTIME]   → SKIPPED: Past event in linear mode');
-        }
-        
-        // IMMEDIATE PLAYBACK FIX: If user just added this note, play it immediately
-        // instead of waiting for the next loop iteration
-        if (shouldSchedule && isLooping) {
-          final loopLength = stepCount.toDouble();
-          final currentLoopBeat = currentBeat % loopLength;
-          final eventLoopBeat = beat % loopLength;
-          
-          // If the event beat is coming up soon in the current loop (within next 0.5 beats)
-          // OR if we just passed it (within last 0.2 beats), play it immediately
-          final timeToEvent = eventLoopBeat - currentLoopBeat;
-          final justAdded = timeToEvent > -0.2 && timeToEvent < 0.5;
-          
-          if (justAdded) {
-            print('[ANDROID-REALTIME]   → IMMEDIATE: User just added note for beat $beat, playing now! (currentLoopBeat=$currentLoopBeat, eventLoopBeat=$eventLoopBeat, timeToEvent=$timeToEvent)');
-            
-            // Schedule immediate note-on (right now)
-            trackEvents.add(MidiEvent(
-              beat: currentBeat + 0.001, // Schedule almost immediately
-              midiStatus: 0x90,
-              midiData1: noteNumber,
-              midiData2: midiVelocity,
-            ));
-            
-            // And immediate note-off
-            final maxNoteDuration = isLooping ? (stepCount.toDouble() - beat) : noteDuration;
-            final immediateNoteDuration = dart_math.min(noteDuration, maxNoteDuration.clamp(0.1, noteDuration));
-            trackEvents.add(MidiEvent(
-              beat: currentBeat + 0.001 + immediateNoteDuration,
-              midiStatus: 0x80,
-              midiData1: noteNumber,
-              midiData2: 0,
-            ));
-          }
-        }
-        
-        scheduledCount++;
+        print('  - Step $step: note=$noteNumber, vel=$velocity, beat=$beat');
       }
     });
     
-    print('[ANDROID-REALTIME] === EVENT SCHEDULING SUMMARY ===');
-    print('[ANDROID-REALTIME] Total cells with sound: $currentEventCount');
-    print('[ANDROID-REALTIME] Events scheduled: $scheduledCount');
-    print('[ANDROID-REALTIME] Events skipped: $skippedCount');
-    print('[ANDROID-REALTIME] Total MIDI events created: ${trackEvents.length} (${trackEvents.length ~/ 2} note pairs)');
+    // 3. Check timing info
+    final currentTempo = sequence.getTempo();
+    final noteDuration = _calculateNoteDuration(currentTempo);
+    print('🔍 TIMING INFO:');
+    print('  - Tempo: $currentTempo BPM');
+    print('  - Note duration: $noteDuration beats');
+    print('  - Sequence position: ${sequence.getBeat()}');
     
-    // Check if events actually changed
-    final eventsChanged = trackEvents.length != existingEvents.length || !_eventsEqual(trackEvents, existingEvents);
-    print('[ANDROID-REALTIME] === BUFFER UPDATE DECISION ===');
-    print('[ANDROID-REALTIME] Events changed: $eventsChanged');
-    print('[ANDROID-REALTIME] Old count: ${existingEvents.length}, New count: ${trackEvents.length}');
+    // 4. Check rapid editing state
+    bool isRapid = _isRapidEditing(trackId);
+    print('🔍 RAPID EDITING:');
+    print('  - Is rapid editing: $isRapid');
+    print('  - Last sync: ${_lastLightweightSync[trackId] ?? 0}');
     
-    if (eventsChanged) {
-      print('[ANDROID-REALTIME] === UPDATING TRACK ===');
-      
-      // Update track events
-      track.clearEvents();
-      track.events.addAll(trackEvents);
-      print('[ANDROID-REALTIME] Track events updated: ${track.events.length} events');
-      
-      // Try different approaches for immediate playback
-      if (Platform.isAndroid && isPlayingNow) {
-        print('[ANDROID-REALTIME] === ATTEMPTING IMMEDIATE PLAYBACK ===');
-        
-        // CRITICAL FIX: Only use topOffBuffer to avoid disrupting other tracks
-        // The syncBuffer() call was interfering with other tracks' scheduled events
-        print('[ANDROID-REALTIME] Using topOffBuffer() only to preserve other tracks...');
-        track.topOffBuffer();
-        
-        print('[ANDROID-REALTIME] Real-time update completed - other tracks preserved');
-      } else {
-        print('[ANDROID-REALTIME] Skipping immediate playback: Platform.isAndroid=${Platform.isAndroid}, isPlaying=$isPlayingNow');
-      }
-    } else {
-      print('[ANDROID-REALTIME] No changes detected - no buffer update needed');
-    }
-    
-    print('[ANDROID-REALTIME] === REAL-TIME EDITING DEBUG END ===');
+    print('🔍 === END DIAGNOSTIC TEST ===\n');
   }
   
-  // Helper method to compare event lists
-  bool _eventsEqual(List<SchedulerEvent> events1, List<SchedulerEvent> events2) {
-    if (events1.length != events2.length) return false;
-    for (int i = 0; i < events1.length; i++) {
-      final e1 = events1[i] as MidiEvent;
-      final e2 = events2[i] as MidiEvent;
-      if (e1.beat != e2.beat || e1.midiStatus != e2.midiStatus || 
-          e1.midiData1 != e2.midiData1 || e1.midiData2 != e2.midiData2) {
-        return false;
+  // Count events in Dart state
+  int _countStateEvents(int trackId) {
+    int count = 0;
+    trackStepSequencerStates[trackId]!.iterateEvents((step, noteNumber, velocity) {
+      if (step < stepCount && velocity > 0) {
+        count++;
       }
-    }
-    return true;
+    });
+    return count;
   }
   
+  // Count events in native track (approximation)
+  int _countTrackEvents(Track track) {
+    // Since we can't directly query track events, return the cached count
+    return _trackEventCounts[track.id] ?? 0;
+  }
+
+  // Check if a track has any events in its state
+  bool _trackHasEvents(int trackId) {
+    final state = trackStepSequencerStates[trackId];
+    if (state == null) return false;
+
+    bool hasEvents = false;
+    state.iterateEvents((step, noteNumber, velocity) {
+      if (step < stepCount && velocity > 0) {
+        hasEvents = true;
+      }
+    });
+    return hasEvents;
+  }
+
+
   void syncTrack(Track track) {
     final trackId = track.id;
     final currentTempo = sequence.getTempo();
@@ -1154,6 +1172,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       if (Platform.isAndroid && isPlaying && eventCountChanged) {
         track.topOffBuffer();
         print('[SYNC-TRACK] Android real-time: Used topOffBuffer for immediate event scheduling');
+
+        // Also clear timeline cache to ensure new events are processed
+        _timelineNeedsRebuild = true;
+        _processedEvents.clear(); // Allow new events to be processed immediately
       }
       
       _trackEventCounts[trackId] = noteCount;
@@ -1182,10 +1204,18 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     handleTempoChange(projectState.tempo);
     handleSetLoop(projectState.isLooping);
 
-    // PERFORMANCE: Sync all tracks efficiently
+    // PERFORMANCE: Sync all tracks efficiently (but only if they have events)
     for (final track in tracks) {
       markTrackDirty(track.id);
-      syncTrack(track);
+
+      // Only sync tracks that actually have events to avoid unnecessary processing
+      final hasEvents = _trackHasEvents(track.id);
+      if (hasEvents) {
+        syncTrack(track);
+        print('[SYNC-EFFICIENT] Synced track ${track.id} (has events)');
+      } else {
+        print('[SYNC-EFFICIENT] Skipped track ${track.id} (no events)');
+      }
     }
   }
   
