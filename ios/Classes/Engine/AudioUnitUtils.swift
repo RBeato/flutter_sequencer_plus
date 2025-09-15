@@ -94,7 +94,6 @@ extension AudioUnitUtils {
                                     UInt32(MemoryLayout<UInt32>.size))
         // Note: Not all AudioUnits support this property, so we don't throw on error
         
-        print("[AudioUnitUtils] AudioUnit configured for optimal performance")
     }
     
     /// Set AudioUnit stream format
@@ -129,7 +128,6 @@ extension AudioUnitUtils {
         let fileSize = fileAttributes[.size] as? Int64 ?? 0
         let sizeInMB = Double(fileSize) / (1024 * 1024)
         
-        print("[AudioUnitUtils] Loading SoundFont: \(url.lastPathComponent) (\(String(format: "%.1f", sizeInMB)) MB)")
         
         // Load with memory optimization for large files
         if sizeInMB > 50 {
@@ -151,7 +149,6 @@ extension AudioUnitUtils {
         // Set initial program
         try setProgram(audioUnit: audioUnit, program: UInt8(presetIndex))
         
-        print("[AudioUnitUtils] SoundFont loaded successfully")
     }
     
     private static func optimizeForLargeSoundFont(audioUnit: AudioUnit) throws {
@@ -173,7 +170,6 @@ extension AudioUnitUtils {
                                                  &polyphony,
                                                  UInt32(MemoryLayout<UInt32>.size))
         
-        print("[AudioUnitUtils] Optimized for large SoundFont")
     }
     
     /// Set program (preset) on AudioUnit

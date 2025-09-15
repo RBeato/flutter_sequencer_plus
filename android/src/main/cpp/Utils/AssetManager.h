@@ -33,11 +33,11 @@ void JNICALL Java_com_michaeljperri_flutter_1sequencer_FlutterSequencerPlugin_se
     assetManager = AAssetManager_fromJava(env, jAssetManager);
 
     if (assetManager == nullptr) {
-    LOGE("Could not load assetManager");
+    // Could not load assetManager
     return;
     }
 
-    LOGI("Successfully set asset manager in native module");
+    // Asset manager set in native module
 }
 
 extern "C" __attribute__((visibility("default"))) __attribute__((used))

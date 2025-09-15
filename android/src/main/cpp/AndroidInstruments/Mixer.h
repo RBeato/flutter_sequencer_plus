@@ -100,16 +100,10 @@ public:
             auto track = getTrack(trackIndex);
 
             if (track.has_value()) {
-                // Reduce logging frequency during playback
-                uint8_t statusCode = midiEvent.midiStatus >> 4;
-                static int noteOnLogCount = 0;
-                if (statusCode == 0x9 && ++noteOnLogCount % 8 == 0) { // Only log every 8th note
-                    LOGI("→ Mixer routing NOTE ON to track %d: note=%d vel=%d", 
-                         trackIndex, midiEvent.midiData1, midiEvent.midiData2);
-                }
+                // MIDI event routed to track
                 track.value()->handleMidiEvent(midiEvent.midiStatus, midiEvent.midiData1, midiEvent.midiData2);
             } else {
-                LOGE("❌ MIXER ERROR: Track %d doesn't exist!", trackIndex);
+                // Mixer error: track doesn't exist
             }
         }
     }
@@ -159,9 +153,9 @@ public:
             nextTrackInfo.level = level;
             mTrackMap.insert_or_assign(trackIndex, nextTrackInfo);
             
-            LOGI("Mixer: Set track %d level to %.3f", trackIndex, level);
+            // Track level set
         } else {
-            LOGE("Mixer: Failed to set level for track %d - track not found", trackIndex);
+            // Failed to set track level - track not found
         }
     }
 
@@ -172,7 +166,7 @@ public:
             TrackInfo nextTrackInfo = maybeTrackInfo.value();
             return nextTrackInfo.level;
         } else {
-            LOGE("Mixer: getLevel called for non-existent track %d - returning default 1.0", trackIndex);
+            // getLevel called for non-existent track - returning default
             return 1.0f; // Return sensible default instead of 0.0
         }
     }

@@ -348,11 +348,9 @@ class Track {
   void syncBuffer(
       [int? absoluteStartFrame, int maxEventsToSync = BUFFER_SIZE]) {
     // SURGICAL DEBUG: Track all sync operations
-    print('[SYNC-DEBUG] Track $id: syncBuffer called, iosNativeSchedulingEnabled=${Sequence.globalState.iosNativeSchedulingEnabled}');
     
     // iOS dart-dispatch mode: do not schedule natively to avoid double triggers
     if (Platform.isIOS && !Sequence.globalState.iosNativeSchedulingEnabled) {
-      print('[SYNC-DEBUG] Track $id: syncBuffer SKIPPED (iOS dart-dispatch mode)');
       return;
     }
     final position = NativeBridge.getPosition();
@@ -377,10 +375,8 @@ class Track {
 
     if (sequence.isPlaying) {
       final relativeStartFrame = absoluteStartFrame - sequence.engineStartFrame;
-      print('[SYNC-DEBUG] Track $id: sequence.isPlaying=true, calling _scheduleEventsOptimized(relativeStartFrame=$relativeStartFrame, maxEvents=$maxEventsToSync)');
       _scheduleEventsOptimized(relativeStartFrame, maxEventsToSync);
     } else {
-      print('[SYNC-DEBUG] Track $id: sequence.isPlaying=false, setting lastFrameSynced=0');
       lastFrameSynced = 0;
     }
   }
@@ -390,11 +386,9 @@ class Track {
   /// any un-synced events.
   void topOffBuffer() {
     // SURGICAL DEBUG: Track top-off operations
-    print('[TOPOFF-DEBUG] Track $id: topOffBuffer called, iosNativeSchedulingEnabled=${Sequence.globalState.iosNativeSchedulingEnabled}');
     
     // iOS dart-dispatch mode: do not top-off native buffer
     if (Platform.isIOS && !Sequence.globalState.iosNativeSchedulingEnabled) {
-      print('[TOPOFF-DEBUG] Track $id: topOffBuffer SKIPPED (iOS dart-dispatch mode)');
       return;
     }
     final bufferAvailableCount = NativeBridge.getBufferAvailableCount(id);
@@ -437,7 +431,6 @@ class Track {
     
     if (!isBeforeLoopEnd) {
       if (DEBUG_SEQUENCER_LOGS) {
-        print('[Track:$id] schedule(no-loop) startFrame=$startFrame endFrame=${sequence.beatToFrames(sequence.endBeat)} max=$maxEventsToSync');
       }
       _scheduleEventsInRange(
           maxEventsToSync,
@@ -454,7 +447,6 @@ class Track {
     final loopEndFrame = sequence.beatToFrames(sequence.loopEndBeat);
 
     if (DEBUG_SEQUENCER_LOGS) {
-      print('[Track:$id] schedule(loop) startFrame=$startFrame loopStart=$loopStartFrame loopEnd=$loopEndFrame loopLen=$loopLength loopsElapsed=$loopsElapsed max=$maxEventsToSync');
     }
 
     var eventsSyncedCount = _scheduleEventsInRange(
@@ -470,7 +462,6 @@ class Track {
 
     while (eventsSyncedCount < maxEventsToSync && maxLoopIterations > 0) {
       if (DEBUG_SEQUENCER_LOGS) {
-        print('[Track:$id] schedule(loop-iter) idx=$loopIndex remaining=${maxEventsToSync - eventsSyncedCount} offset=${loopLength * loopIndex}');
       }
       lastBatchCount = _scheduleEventsInRange(
           maxEventsToSync - eventsSyncedCount,
@@ -512,18 +503,16 @@ class Track {
       return 0;
     }
 
-    print('[SCHEDULE-DEBUG] Track $id: About to schedule ${eventsToSync.length} events to NativeBridge.scheduleEvents');
     var eventsSyncedCount = NativeBridge.scheduleEvents(
         id,
         eventsToSync,
         sampleRate,
         tempo,
         sequence.engineStartFrame + frameOffset);
-    print('[SCHEDULE-DEBUG] Track $id: NativeBridge.scheduleEvents returned eventsSyncedCount=$eventsSyncedCount');
     
     // ANDROID REAL-TIME EDITING FIX: If buffer is full during playback, clear old events and retry
     if (eventsSyncedCount == 0 && eventsToSync.isNotEmpty && sequence.isPlaying && Platform.isAndroid) {
-      print('[ANDROID-BUFFER-FIX] Track $id: Buffer full during playback, clearing old events and retrying');
+      // Android buffer full, clearing and retrying
       
       // Clear events that are more than 1 second in the past to make room for new events
       final currentFrame = NativeBridge.getPosition();
@@ -537,7 +526,7 @@ class Track {
           sampleRate,
           tempo,
           sequence.engineStartFrame + frameOffset);
-      print('[ANDROID-BUFFER-FIX] Track $id: After buffer clear, eventsSyncedCount=$eventsSyncedCount');
+      // Buffer cleared, retrying events
     }
 
     if (eventsSyncedCount > 0) {
@@ -548,7 +537,7 @@ class Track {
         final firstEvent = eventsToSync.first;
         final firstFrame = sequence.beatToFrames(firstEvent.beat) + sequence.engineStartFrame + frameOffset;
         final lastAbs = lastEventFrame + sequence.engineStartFrame + frameOffset;
-        print('[Track:$id] synced count=$eventsSyncedCount firstAbs=$firstFrame lastAbs=$lastAbs frameOffset=$frameOffset engineStart=${sequence.engineStartFrame}');
+        // Events synced successfully
       }
     }
 

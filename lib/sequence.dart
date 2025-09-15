@@ -111,18 +111,10 @@ class Sequence {
       }
     }
 
-    // SURGICAL DEBUG: Track sequence play operations
-    print('[SEQUENCE-DEBUG] Sequence.play(): Platform.isIOS=${Platform.isIOS}, iosNativeSchedulingEnabled=${GlobalState().iosNativeSchedulingEnabled}');
-    
     // If we rely on Dart dispatch on iOS, clear any native buffers to avoid double triggers
     if (Platform.isIOS && !GlobalState().iosNativeSchedulingEnabled) {
-      print('[SEQUENCE-DEBUG] Clearing native buffers for iOS dart-dispatch mode');
       getTracks().forEach((track) => track.clearBuffer());
-    } else {
-      print('[SEQUENCE-DEBUG] Using native scheduling - NOT clearing buffers');
     }
-
-    print('[SEQUENCE-DEBUG] Calling globalState.playSequence(id=$id)');
     globalState.playSequence(id);
   }
 
@@ -409,8 +401,7 @@ class Sequence {
     try {
       // Add timeout to prevent infinite hanging on track creation
       final result = await Track.buildWithErrorInfo(sequence: this, instrument: instrument)
-        .timeout(Duration(seconds: 15), onTimeout: () {
-          print('[TIMEOUT] Track creation timed out for instrument: ${instrument.displayName}');
+        .timeout(const Duration(seconds: 15), onTimeout: () {
           return InstrumentLoadResult.error(
             InstrumentError.invalidFormat(
               instrument.displayName,
@@ -425,7 +416,7 @@ class Sequence {
 
       return result;
     } catch (e) {
-      print('[ERROR] Exception during track creation for ${instrument.displayName}: $e');
+      // Track creation failed with exception
       return InstrumentLoadResult.error(
         InstrumentError.invalidFormat(
           instrument.displayName,

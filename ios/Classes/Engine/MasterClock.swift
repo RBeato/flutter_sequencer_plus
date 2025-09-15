@@ -36,7 +36,6 @@ public class MasterClock {
         setupTimebase()
         calculateTimebaseRatios()
         
-        print("[MasterClock] Initialized: \(sampleRate)Hz, \(bufferSize) samples/buffer")
     }
     
     deinit {
@@ -81,7 +80,6 @@ extension MasterClock {
             pausedSampleTime = 0
             isRunning = true
             
-            print("[MasterClock] Started at sample time \(startSampleTime)")
         }
     }
     
@@ -94,7 +92,6 @@ extension MasterClock {
             startSampleTime = 0
             pausedSampleTime = 0
             
-            print("[MasterClock] Stopped")
         }
     }
     
@@ -107,7 +104,6 @@ extension MasterClock {
             pausedSampleTime = hostTimeToSampleTime(currentHostTime) - startSampleTime
             isRunning = false
             
-            print("[MasterClock] Paused at sample time \(pausedSampleTime)")
         }
     }
     
@@ -120,7 +116,6 @@ extension MasterClock {
             startSampleTime = hostTimeToSampleTime(currentHostTime) - pausedSampleTime
             isRunning = true
             
-            print("[MasterClock] Resumed from sample time \(pausedSampleTime)")
         }
     }
 }
@@ -143,7 +138,6 @@ extension MasterClock {
                 startSampleTime += AVAudioFramePosition(timingAdjustment)
             }
             
-            print("[MasterClock] Tempo changed to \(currentTempo) BPM")
         }
     }
     
@@ -240,7 +234,6 @@ extension MasterClock {
             // Adjust clock if drift is significant (> 1 sample)
             if abs(drift) > 1 {
                 startSampleTime += drift
-                print("[MasterClock] Synced to external clock, drift: \(drift) samples")
             }
         }
     }

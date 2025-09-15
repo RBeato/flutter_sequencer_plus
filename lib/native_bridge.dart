@@ -49,7 +49,6 @@ class NativeBridge {
       // Register it with our native code
       registerFunc(postCObjectPtr);
       
-      if (DEBUG_SEQUENCER_LOGS) print('[DEBUG] NativeBridge: Successfully registered Dart PostCObject callback');
     } catch (e) {
       print('[ERROR] NativeBridge: Failed to register Dart PostCObject: $e');
     }
@@ -79,7 +78,6 @@ class NativeBridge {
     _getBufferAvailableCount = _lib!.lookup<NativeFunction<Uint32 Function(Uint32)>>('get_buffer_available_count');
     try {
       _handleEventsNow = _lib!.lookup<NativeFunction<Void Function(Uint32, Pointer<Uint8>, Uint32)>>('handle_events_now');
-      if (DEBUG_SEQUENCER_LOGS) print('[DEBUG] NativeBridge: Successfully found handle_events_now FFI function');
     } catch (e) {
       print('[ERROR] NativeBridge: Failed to find handle_events_now: $e');
       rethrow;
@@ -92,7 +90,6 @@ class NativeBridge {
     try {
       _engineStop = _lib!.lookup<NativeFunction<Void Function()>>('engine_stop');
     } catch (e) {
-      print('[DEBUG] NativeBridge: engine_stop not found, using engine_pause for stops');
       _engineStop = _enginePause; // Fallback to pause for older implementations
     }
 
@@ -104,7 +101,6 @@ class NativeBridge {
   }
 
   static Future<int> doSetup() async {
-    if (DEBUG_SEQUENCER_LOGS) print('[DEBUG] NativeBridge: Starting doSetup...');
     try {
       _ensureInitialized();
       
@@ -112,18 +108,14 @@ class NativeBridge {
       if (Platform.isAndroid) {
         const channel = MethodChannel('flutter_sequencer');
         await channel.invokeMethod('setupAssetManager');
-        print('[DEBUG] NativeBridge: Android AssetManager setup completed');
       }
       
-      if (DEBUG_SEQUENCER_LOGS) print('[DEBUG] NativeBridge: FFI initialized successfully');
 
       final receivePort = ReceivePort();
       final setupEngine = _setupEngine.asFunction<void Function(int)>();
 
-      if (DEBUG_SEQUENCER_LOGS) print('[DEBUG] NativeBridge: Calling setup_engine FFI function...');
       setupEngine(receivePort.sendPort.nativePort);
 
-      if (DEBUG_SEQUENCER_LOGS) print('[DEBUG] NativeBridge: Waiting for sample rate callback...');
       final sampleRate = await receivePort.first.timeout(
         Duration(seconds: 5),
         onTimeout: () {
@@ -133,7 +125,6 @@ class NativeBridge {
       ) as int;
       receivePort.close();
 
-      if (DEBUG_SEQUENCER_LOGS) print('[DEBUG] NativeBridge: Received sample rate: $sampleRate');
       return sampleRate;
     } catch (e) {
       print('[ERROR] NativeBridge: doSetup failed: $e');
@@ -166,7 +157,6 @@ class NativeBridge {
 
   static Future<int> addTrackSf2(String filename, bool isAsset, int patchNumber) async {
     _ensureInitialized();
-    if (DEBUG_SEQUENCER_LOGS) print('[DEBUG] NativeBridge: Adding SF2 track: $filename');
 
     final receivePort = ReceivePort();
     final pathPointer = filename.toNativeUtf8();
@@ -187,7 +177,6 @@ class NativeBridge {
       
       // Convert max value to -1 for failure indication
       final result = trackIndex == 4294967295 ? -1 : trackIndex; // UInt32.max = 4294967295
-      if (DEBUG_SEQUENCER_LOGS) print('[DEBUG] NativeBridge: SF2 track added successfully: $filename -> $result');
       return result;
     } catch (e) {
       print('[ERROR] NativeBridge: Failed to add SF2 track: $filename - $e');
@@ -266,7 +255,6 @@ class NativeBridge {
   }
 
   static Future<int> addTrackAudioUnit(String audioUnitId) async {
-    if (DEBUG_SEQUENCER_LOGS) print('[DEBUG] NativeBridge: Adding AudioUnit track: $audioUnitId');
     
     if (Platform.isAndroid) {
       print('[ERROR] AudioUnit not supported on Android');
@@ -280,7 +268,6 @@ class NativeBridge {
       });
       
       final trackIndex = result as int? ?? -1;
-      if (DEBUG_SEQUENCER_LOGS) print('[DEBUG] NativeBridge: AudioUnit track added: $audioUnitId -> $trackIndex');
       return trackIndex;
     } catch (e) {
       print('[ERROR] NativeBridge: Failed to add AudioUnit track: $audioUnitId - $e');

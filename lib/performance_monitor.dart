@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'native_bridge.dart';
 
 /// High-performance monitoring system for flutter_sequencer
 class PerformanceMonitor {
@@ -29,14 +28,14 @@ class PerformanceMonitor {
       _updateMetrics();
     });
     
-    print('[PerformanceMonitor] Started real-time monitoring');
+    // Performance monitoring started
   }
   
   /// Stop performance monitoring
   void stopMonitoring() {
     _monitoringTimer?.cancel();
     _monitoringTimer = null;
-    print('[PerformanceMonitor] Stopped monitoring');
+    // Performance monitoring stopped
   }
   
   /// Record event processing
@@ -128,23 +127,8 @@ class PerformanceMonitor {
   
   /// Print performance report
   void printReport() {
-    final stats = getStats();
-    final recommendations = getRecommendations();
-    
-    print('\\n=== FLUTTER SEQUENCER PERFORMANCE REPORT ===');
-    print('Total Events Processed: ${stats['totalEventsProcessed']}');
-    print('Average Latency: ${stats['averageLatencyMs']} ms');
-    print('Events/Second: ${stats['eventsPerSecond']}');
-    print('Buffer Underruns: ${stats['totalBufferUnderruns']}');
-    print('Loop Restarts: ${stats['totalLoopRestarts']}');
-    print('Platform: ${stats['platform']}');
-    print('Performance Status: ${stats['isOptimalPerformance'] ? 'OPTIMAL' : 'NEEDS OPTIMIZATION'}');
-    
-    print('\\nRECOMMENDATIONS:');
-    for (int i = 0; i < recommendations.length; i++) {
-      print('${i + 1}. ${recommendations[i]}');
-    }
-    print('===============================================\\n');
+    // Performance report generation removed for production
+    // Use getStats() and getRecommendations() methods to access data programmatically
   }
   
   /// Reset all metrics
@@ -155,7 +139,7 @@ class PerformanceMonitor {
     _averageLatency = 0.0;
     _latencyHistory.clear();
     _eventCountHistory.clear();
-    print('[PerformanceMonitor] Metrics reset');
+    // Metrics reset
   }
 }
 
