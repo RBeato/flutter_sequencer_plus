@@ -18,11 +18,11 @@ func loadSoundFont(avAudioUnit: AVAudioUnit, soundFontURL: URL, presetIndex: Int
         return
     }
 
-    // CRITICAL FIX: Convert Swift URL to CFURL for AudioToolbox compatibility
-    // AudioUnitSetProperty requires a CFURLRef pointer, not a Swift URL struct
-    // This prevents the _TtCs12_SwiftObject doesNotRecognizeSelector crash
-    // We must use withUnsafePointer to pass the CFURL reference correctly
-    let cfURL = soundFontURL as CFURL
+    // CRITICAL FIX: Convert to NSURL first, then to CFURL
+    // This prevents the "_TtCs12_SwiftObject doesNotRecognizeSelector" crash
+    // iOS expects a proper Objective-C URL object, not Swift's internal URL
+    let nsURL = soundFontURL as NSURL
+    let cfURL = nsURL as CFURL
 
     // Load SoundFont with error handling using proper CFURL pointer passing
     var result: OSStatus = noErr
