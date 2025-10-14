@@ -116,31 +116,32 @@ extension AudioUnitUtils {
     
     /// Load SoundFont into AudioUnit with advanced error handling
     public static func loadSoundFont(audioUnit: AudioUnit, url: URL, presetIndex: Int = 0) throws {
-        var mutableURL = url
-        
+        // CRITICAL FIX: Convert Swift URL to CFURL for AudioToolbox compatibility
+        var cfURL = url as CFURL
+
         // Verify file exists
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw AudioUnitError.fileNotFound(url.path)
         }
-        
+
         // Get file size for memory management
         let fileAttributes = try FileManager.default.attributesOfItem(atPath: url.path)
         let fileSize = fileAttributes[.size] as? Int64 ?? 0
         let sizeInMB = Double(fileSize) / (1024 * 1024)
-        
-        
+
+
         // Load with memory optimization for large files
         if sizeInMB > 50 {
             try optimizeForLargeSoundFont(audioUnit: audioUnit)
         }
-        
+
         // Load SoundFont
         let result = AudioUnitSetProperty(audioUnit,
                                         kMusicDeviceProperty_SoundBankURL,
                                         kAudioUnitScope_Global,
                                         0,
-                                        &mutableURL,
-                                        UInt32(MemoryLayout<URL>.size))
+                                        &cfURL,
+                                        UInt32(MemoryLayout<CFURL>.size))
         
         if result != noErr {
             throw AudioUnitError.soundFontLoadFailed(result)

@@ -4,54 +4,71 @@
 #include "SchedulerEvent.h"
 
 track_index_t BaseScheduler::addTrack() {
+    std::lock_guard<std::mutex> lock(mBufferMutex);
     auto maxTracks = std::numeric_limits<track_index_t>::max();
-    
+
     for (track_index_t trackIndex = 0; trackIndex < maxTracks; trackIndex++) {
         if (mBufferMap[trackIndex] == nullptr) {
             auto buffer = std::make_shared<Buffer<>>();
-            
+
             mBufferMap[trackIndex] = buffer;
-            
+
             return trackIndex;
         }
     }
-    
+
     return -1;
 }
 
 void BaseScheduler::removeTrack(track_index_t trackIndex) {
-    mBufferMap.erase(trackIndex);
+    {
+        std::lock_guard<std::mutex> lock(mBufferMutex);
+        mBufferMap.erase(trackIndex);
+        mHasRenderedMap.erase(trackIndex);
+    }
 
     onRemoveTrack(trackIndex);
 }
 
 void BaseScheduler::handleEventsNow(track_index_t trackIndex, const SchedulerEvent* events, uint32_t eventsCount) {
-    // Safety check
-    if (mBufferMap.find(trackIndex) == mBufferMap.end()) {
-        return;
+    // Thread-safe check
+    {
+        std::lock_guard<std::mutex> lock(mBufferMutex);
+        if (mBufferMap.find(trackIndex) == mBufferMap.end()) {
+            return;
+        }
     }
-    
+
     for (uint32_t i = 0; i < eventsCount; i++) {
         handleEvent(trackIndex, events[i], 0);
     }
 }
 
 uint32_t BaseScheduler::scheduleEvents(track_index_t trackIndex, const SchedulerEvent* events, uint32_t eventsCount) {
-    // Safety check
+    std::lock_guard<std::mutex> lock(mBufferMutex);
+
+    // Thread-safe check
     if (mBufferMap.find(trackIndex) == mBufferMap.end()) {
         return 0;
     }
-    
+
     // Events must come after anything already in the buffer and be sorted by frame, ascending.
     return mBufferMap[trackIndex]->add(events, eventsCount);
 };
 
 void BaseScheduler::clearEvents(track_index_t trackIndex, position_frame_t fromFrame) {
-    // Safety check
+    std::lock_guard<std::mutex> lock(mBufferMutex);
+
+    // Thread-safe check - CRITICAL FIX for crash
     if (mBufferMap.find(trackIndex) == mBufferMap.end()) {
         return;
     }
-    
+
+    // Additional safety: check if buffer pointer is valid
+    if (mBufferMap[trackIndex] == nullptr) {
+        return;
+    }
+
     mBufferMap[trackIndex]->clearAfter(fromFrame);
 };
 
@@ -68,27 +85,43 @@ void BaseScheduler::pause() {
 };
 
 void BaseScheduler::resetTrack(track_index_t trackIndex) {
-    // Safety check: ensure track exists in buffer map
-    if (mBufferMap.find(trackIndex) == mBufferMap.end()) {
-        return;
+    // Thread-safe operation
+    {
+        std::lock_guard<std::mutex> lock(mBufferMutex);
+
+        // Safety check: ensure track exists in buffer map
+        if (mBufferMap.find(trackIndex) == mBufferMap.end()) {
+            return;
+        }
+
+        // Additional safety: check if buffer pointer is valid
+        if (mBufferMap[trackIndex] == nullptr) {
+            return;
+        }
+
+        // MINIMAL RESET: Don't send ANY MIDI events during reset to prevent corruption
+        // Just call the platform-specific reset and clear the buffer
+
+        // Clear the event buffer for this track
+        mBufferMap[trackIndex]->clear();
     }
-    
-    // MINIMAL RESET: Don't send ANY MIDI events during reset to prevent corruption
-    // Just call the platform-specific reset and clear the buffer
-    
-    // Clear the event buffer for this track
-    mBufferMap[trackIndex]->clear();
-    
-    // Call the platform-specific reset WITHOUT sending MIDI events
+
+    // Call the platform-specific reset WITHOUT sending MIDI events (outside lock)
     onResetTrack(trackIndex);
 }
 
 uint32_t BaseScheduler::getBufferAvailableCount(track_index_t trackIndex) {
-    // Safety check
+    std::lock_guard<std::mutex> lock(mBufferMutex);
+
+    // Thread-safe check
     if (mBufferMap.find(trackIndex) == mBufferMap.end()) {
         return 0;
     }
-    
+
+    if (mBufferMap[trackIndex] == nullptr) {
+        return 0;
+    }
+
     return mBufferMap[trackIndex]->availableCount();
 }
 
@@ -104,8 +137,20 @@ uint64_t BaseScheduler::getLastRenderTimeUs() {
 
 void BaseScheduler::handleFrames(track_index_t trackIndex, uint32_t numFramesToRender) {
     if (!mIsPlaying) return;
-    
-    auto buffer = mBufferMap[trackIndex];
+
+    // Thread-safe buffer access
+    std::shared_ptr<Buffer<>> buffer;
+    {
+        std::lock_guard<std::mutex> lock(mBufferMutex);
+
+        // Safety check: ensure track exists
+        if (mBufferMap.find(trackIndex) == mBufferMap.end() || mBufferMap[trackIndex] == nullptr) {
+            return;
+        }
+
+        buffer = mBufferMap[trackIndex];
+    }
+
     auto originalPositionFrames = mPositionFrames; // so we can check if setPosition was called
     auto startFrame = mPositionFrames;
     auto lastFrameRendered = startFrame;
@@ -143,29 +188,34 @@ void BaseScheduler::handleFrames(track_index_t trackIndex, uint32_t numFramesToR
     }
     
     handleRenderAudioRange(trackIndex, framesRendered, numFramesToRender - framesRendered);
-    
 
-    mHasRenderedMap[trackIndex] = true;
-    bool allTracksHaveRendered = true;
-    
-    for (auto pair : mHasRenderedMap) {
-        if (pair.second == false) {
-            allTracksHaveRendered = false;
-            break;
-        }
-    }
-    
-    if (allTracksHaveRendered) {
-        // Don't update the position if setPosition was called during this function
-        if (mPositionFrames == originalPositionFrames) {
-            mPositionFrames = startFrame + numFramesToRender;
-            // printf("Track %i: Updated position to %i\n", trackIndex, mPositionFrames);
-        // } else {
-            // printf("Track %i: Not updating position since it changed during render\n", trackIndex);
-        }
-        
+
+    // Thread-safe access to mHasRenderedMap
+    {
+        std::lock_guard<std::mutex> lock(mBufferMutex);
+
+        mHasRenderedMap[trackIndex] = true;
+        bool allTracksHaveRendered = true;
+
         for (auto pair : mHasRenderedMap) {
-            mHasRenderedMap[pair.first] = false;
+            if (pair.second == false) {
+                allTracksHaveRendered = false;
+                break;
+            }
+        }
+
+        if (allTracksHaveRendered) {
+            // Don't update the position if setPosition was called during this function
+            if (mPositionFrames == originalPositionFrames) {
+                mPositionFrames = startFrame + numFramesToRender;
+                // printf("Track %i: Updated position to %i\n", trackIndex, mPositionFrames);
+            // } else {
+                // printf("Track %i: Not updating position since it changed during render\n", trackIndex);
+            }
+
+            for (auto pair : mHasRenderedMap) {
+                mHasRenderedMap[pair.first] = false;
+            }
         }
     }
 }

@@ -9,17 +9,18 @@ func isAppleSampler(component: AVAudioUnitComponent) -> Bool {
 
 func loadSoundFont(avAudioUnit: AVAudioUnit, soundFontURL: URL, presetIndex: Int32) {
     assert(avAudioUnit.audioComponentDescription.componentSubType == kAudioUnitSubType_MIDISynth)
-    
+
     let audioUnit = avAudioUnit.audioUnit
-    var mutableSoundFontURL = soundFontURL
-    
+    // CRITICAL FIX: Convert Swift URL to CFURL for AudioToolbox compatibility
+    var cfURL = soundFontURL as CFURL
+
     // Load SoundFont
     var result = AudioUnitSetProperty(audioUnit,
                                  AudioUnitPropertyID(kMusicDeviceProperty_SoundBankURL),
                                  AudioUnitScope(kAudioUnitScope_Global),
                                  0,
-                                 &mutableSoundFontURL,
-                                 UInt32(MemoryLayout.size(ofValue: mutableSoundFontURL)))
+                                 &cfURL,
+                                 UInt32(MemoryLayout.size(ofValue: cfURL)))
     assert(result == noErr, "SoundFont could not be loaded")
 
     var enabled = UInt32(1)

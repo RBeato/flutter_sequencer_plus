@@ -193,18 +193,19 @@ public class SimpleAudioEngine {
         }
         
         let soundFontURL = URL(fileURLWithPath: soundFontPath)
-        
+
         // Load SoundFont into Apple Sampler
         if FileManager.default.fileExists(atPath: soundFontPath) {
-            var mutableURL = soundFontURL
-            let result = withUnsafePointer(to: &mutableURL) { urlPointer in
+            // CRITICAL FIX: Convert Swift URL to CFURL for AudioToolbox compatibility
+            var cfURL = soundFontURL as CFURL
+            let result = withUnsafePointer(to: &cfURL) { urlPointer in
                 return AudioUnitSetProperty(
                     audioUnit.audioUnit,
                     AudioUnitPropertyID(kMusicDeviceProperty_SoundBankURL),
                     AudioUnitScope(kAudioUnitScope_Global),
                     0,
                     urlPointer,
-                    UInt32(MemoryLayout<URL>.size)
+                    UInt32(MemoryLayout<CFURL>.size)
                 )
             }
             

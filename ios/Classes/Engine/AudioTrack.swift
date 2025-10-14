@@ -288,15 +288,16 @@ extension AudioTrack {
     
     private func loadSoundBank(audioUnit: AudioUnit, filePath: String, presetIndex: Int) throws {
         let url = URL(fileURLWithPath: filePath)
-        var mutableURL = url
-        
+        // CRITICAL FIX: Convert Swift URL to CFURL for AudioToolbox compatibility
+        var cfURL = url as CFURL
+
         // Load sound bank
         let result = AudioUnitSetProperty(audioUnit,
                                         kMusicDeviceProperty_SoundBankURL,
                                         kAudioUnitScope_Global,
                                         0,
-                                        &mutableURL,
-                                        UInt32(MemoryLayout<URL>.size))
+                                        &cfURL,
+                                        UInt32(MemoryLayout<CFURL>.size))
         
         if result != noErr {
             throw AudioTrackError.soundBankLoadFailed(result)

@@ -66,6 +66,8 @@ target_compile_definitions(flutter_sequencer PRIVATE
     USE_TINYSOUNDFONT=1
     _GNU_SOURCE
     _FILE_OFFSET_BITS=64
+    # Support for 16KB memory page sizes (required by Google Play from Nov 2025)
+    PAGE_SIZE=16384
 )
 
 # Link libraries

@@ -356,7 +356,10 @@ public class CocoaEngine {
             return path
         } else {
             let key = registrar.lookupKey(forAsset: path)
-            let normalizedPath = Bundle.main.path(forResource: key, ofType: nil)
+            guard let normalizedPath = Bundle.main.path(forResource: key, ofType: nil) else {
+                print("Could not find asset resource for key: \(key) from path: \(path)")
+                return nil
+            }
             return normalizedPath
         }
     }
