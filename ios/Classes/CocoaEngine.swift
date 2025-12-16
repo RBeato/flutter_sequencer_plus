@@ -161,7 +161,7 @@ public class CocoaEngine {
         print("[PERF] 🚀 Starting parallel creation of \(tracks.count) tracks")
 
         let dispatchGroup = DispatchGroup()
-        var trackIndices: [track_index_t] = Array(repeating: -1, count: tracks.count)
+        var trackIndices: [track_index_t] = Array(repeating: track_index_t(999), count: tracks.count)
         let indicesQueue = DispatchQueue(label: "com.flutter_sequencer.indices")
 
         for (index, trackInfo) in tracks.enumerated() {
@@ -178,7 +178,7 @@ public class CocoaEngine {
 
         dispatchGroup.notify(queue: .main) {
             let totalTime = CFAbsoluteTimeGetCurrent() - startTime
-            let successCount = trackIndices.filter { $0 >= 0 }.count
+            let successCount = trackIndices.filter { $0 < 999 }.count
             print("[PERF] ✅ Parallel loading complete: \(successCount)/\(tracks.count) tracks in \(Int(totalTime * 1000))ms")
             completion(trackIndices)
         }
