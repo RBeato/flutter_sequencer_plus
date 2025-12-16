@@ -10,9 +10,11 @@ public class CocoaEngine {
     private let outputFormat: AVAudioFormat!
     private let registrar: FlutterPluginRegistrar!
 
-    // Swift Dictionary is not thread-safe, so this must be copied before access
+    // PERFORMANCE OPTIMIZATION: Thread-safe audio unit tracking with concurrent reads
     private var unsafeAvAudioUnits: [track_index_t: AVAudioUnit] = [:]
+    private let audioUnitsQueue = DispatchQueue(label: "com.flutter_sequencer.audiounits", attributes: .concurrent)
     private var nextTrackId: track_index_t = 0
+    private let trackIdQueue = DispatchQueue(label: "com.flutter_sequencer.trackid")
     
     // CRITICAL FIX: Position tracking for audio-visual sync
     private var playbackStartSampleTime: AVAudioFramePosition = 0
@@ -78,17 +80,20 @@ public class CocoaEngine {
     }
     
     func addTrackSf2(sf2Path: String, isAsset: Bool, presetIndex: Int32, completion: @escaping (track_index_t) -> Void) {
-        
+        let startTime = CFAbsoluteTimeGetCurrent()
+        print("[PERF] 🚀 Starting SF2 track creation: \(sf2Path)")
+
         AudioUnitUtils.loadAudioUnits { [weak self] avAudioUnitComponents in
-            guard let self = self else { 
+            guard let self = self else {
                 completion(track_index_t(999))
-                return 
+                return
             }
-            
+
             let appleSamplerComponent = avAudioUnitComponents.first(where: isAppleSampler)
-            
+
             if let appleSamplerComponent = appleSamplerComponent {
-                
+                let auStartTime = CFAbsoluteTimeGetCurrent()
+
                 AudioUnitUtils.instantiate(
                     description: appleSamplerComponent.audioComponentDescription,
                     sampleRate: Double(self.outputFormat.sampleRate),
@@ -98,36 +103,84 @@ public class CocoaEngine {
                         completion(track_index_t(999))
                         return
                     }
-                    
+
                     guard let avAudioUnit = avAudioUnit else {
+                        print("[PERF] ❌ AudioUnit instantiation failed")
                         completion(track_index_t(999))
                         return
                     }
-                    
-                    // PERFORMANCE: Execute on main thread for immediate connection
-                    DispatchQueue.main.async {
-                        if let normalizedPath = self.normalizePath(sf2Path, isAsset: isAsset) {
-                            let url = URL(fileURLWithPath: normalizedPath)
-                            
-                            // High-performance SF2 loading with immediate connection
+
+                    let auTime = CFAbsoluteTimeGetCurrent() - auStartTime
+                    print("[PERF] ⏱️  AudioUnit instantiated in \(Int(auTime * 1000))ms")
+
+                    // PERFORMANCE: Execute SF2 loading on background queue, connection on main
+                    let loadStartTime = CFAbsoluteTimeGetCurrent()
+
+                    if let normalizedPath = self.normalizePath(sf2Path, isAsset: isAsset) {
+                        let url = URL(fileURLWithPath: normalizedPath)
+
+                        // Load SF2 on background thread
+                        DispatchQueue.global(qos: .userInitiated).async {
                             loadSoundFont(avAudioUnit: avAudioUnit, soundFontURL: url, presetIndex: presetIndex)
-                            
-                            let trackIndex = self.nextTrackIndex()
-                            
-                            // CRITICAL: Connect immediately and register AudioUnit
-                            self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
-                            
-                            self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
-                            
-                            completion(trackIndex)
-                        } else {
-                            completion(track_index_t(999))
+                            let loadTime = CFAbsoluteTimeGetCurrent() - loadStartTime
+                            print("[PERF] ⏱️  SF2 file loaded in \(Int(loadTime * 1000))ms")
+
+                            // Connection must happen on main thread
+                            DispatchQueue.main.async {
+                                let trackIndex = self.nextTrackIndex()
+
+                                // CRITICAL: Connect immediately and register AudioUnit
+                                self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
+
+                                self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
+
+                                let totalTime = CFAbsoluteTimeGetCurrent() - startTime
+                                print("[PERF] ✅ Track \(trackIndex) ready in \(Int(totalTime * 1000))ms")
+
+                                completion(trackIndex)
+                            }
                         }
+                    } else {
+                        print("[PERF] ❌ Failed to normalize path: \(sf2Path)")
+                        completion(track_index_t(999))
                     }
                 }
             } else {
+                print("[PERF] ❌ Apple Sampler component not found")
                 completion(track_index_t(999))
             }
+        }
+    }
+
+    // PERFORMANCE OPTIMIZATION: Parallel track creation for multiple SF2 files
+    func addMultipleTracksSf2Parallel(
+        tracks: [(path: String, isAsset: Bool, preset: Int32)],
+        completion: @escaping ([track_index_t]) -> Void
+    ) {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        print("[PERF] 🚀 Starting parallel creation of \(tracks.count) tracks")
+
+        let dispatchGroup = DispatchGroup()
+        var trackIndices: [track_index_t] = Array(repeating: -1, count: tracks.count)
+        let indicesQueue = DispatchQueue(label: "com.flutter_sequencer.indices")
+
+        for (index, trackInfo) in tracks.enumerated() {
+            dispatchGroup.enter()
+
+            // Each track loads in parallel
+            addTrackSf2(sf2Path: trackInfo.path, isAsset: trackInfo.isAsset, presetIndex: trackInfo.preset) { trackIndex in
+                indicesQueue.sync {
+                    trackIndices[index] = trackIndex
+                }
+                dispatchGroup.leave()
+            }
+        }
+
+        dispatchGroup.notify(queue: .main) {
+            let totalTime = CFAbsoluteTimeGetCurrent() - startTime
+            let successCount = trackIndices.filter { $0 >= 0 }.count
+            print("[PERF] ✅ Parallel loading complete: \(successCount)/\(tracks.count) tracks in \(Int(totalTime * 1000))ms")
+            completion(trackIndices)
         }
     }
     
@@ -208,10 +261,10 @@ public class CocoaEngine {
         }
         
         // CRITICAL FIX: Keep engine running to preserve SF2 AudioUnit connections
-        // Only send note-off messages to stop hanging notes, don't stop the engine
+        // Only send note-off messages to stop hanging notes, don't stop the engine (thread-safe)
         if self.engine.isRunning {
-            // Send note off to all connected AudioUnits to prevent hanging notes
-            for (trackId, audioUnit) in self.unsafeAvAudioUnits {
+            let audioUnits = audioUnitsQueue.sync { Array(self.unsafeAvAudioUnits.values) }
+            for audioUnit in audioUnits {
                 for noteNumber in 0...127 {
                     let noteOffCommand: UInt32 = 0x80 // Note Off, channel 0
                     let _ = MusicDeviceMIDIEvent(audioUnit.audioUnit, noteOffCommand, UInt32(noteNumber), 0, 0)
@@ -239,9 +292,10 @@ public class CocoaEngine {
             SchedulerPause(scheduler)
         }
         
-        // Send note-off to all tracks
+        // Send note-off to all tracks (thread-safe)
         if self.engine.isRunning {
-            for (trackId, audioUnit) in self.unsafeAvAudioUnits {
+            let audioUnits = audioUnitsQueue.sync { Array(self.unsafeAvAudioUnits.values) }
+            for audioUnit in audioUnits {
                 for noteNumber in 0...127 {
                     let noteOffCommand: UInt32 = 0x80
                     let _ = MusicDeviceMIDIEvent(audioUnit.audioUnit, noteOffCommand, UInt32(noteNumber), 0, 0)
@@ -325,9 +379,10 @@ public class CocoaEngine {
         }
     }
     
-    // Helper to start engine when we have connected nodes
+    // Helper to start engine when we have connected nodes (thread-safe)
     private func startEngineIfNeeded() {
-        if !self.engine.isRunning && !self.unsafeAvAudioUnits.isEmpty {
+        let hasUnits = audioUnitsQueue.sync { !self.unsafeAvAudioUnits.isEmpty }
+        if !self.engine.isRunning && hasUnits {
             do {
                 try self.engine.start()
             } catch {
@@ -337,18 +392,31 @@ public class CocoaEngine {
     }
     
     
+    // THREAD-SAFE: Write operations use barrier for exclusive access
     private func updateAvAudioUnits(trackIndex: track_index_t, avAudioUnit: AVAudioUnit?) {
-        if let avAudioUnit = avAudioUnit {
-            self.unsafeAvAudioUnits[trackIndex] = avAudioUnit
-        } else {
-            self.unsafeAvAudioUnits.removeValue(forKey: trackIndex)
+        audioUnitsQueue.async(flags: .barrier) {
+            if let avAudioUnit = avAudioUnit {
+                self.unsafeAvAudioUnits[trackIndex] = avAudioUnit
+            } else {
+                self.unsafeAvAudioUnits.removeValue(forKey: trackIndex)
+            }
         }
     }
-    
+
+    // THREAD-SAFE: Track ID generation with serial queue
     private func nextTrackIndex() -> track_index_t {
-        let trackIndex = nextTrackId
-        nextTrackId += 1
-        return trackIndex
+        return trackIdQueue.sync {
+            let trackIndex = nextTrackId
+            nextTrackId += 1
+            return trackIndex
+        }
+    }
+
+    // THREAD-SAFE: Read AudioUnit with concurrent access
+    private func getAudioUnit(for trackIndex: track_index_t) -> AVAudioUnit? {
+        return audioUnitsQueue.sync {
+            return self.unsafeAvAudioUnits[trackIndex]
+        }
     }
     
     private func normalizePath(_ path: String, isAsset: Bool) -> String? {
@@ -364,16 +432,16 @@ public class CocoaEngine {
         }
     }
     
-    // Send MIDI event to track
+    // Send MIDI event to track (thread-safe)
     func sendMIDIEvent(trackIndex: track_index_t, midiStatus: UInt8, midiData1: UInt8, midiData2: UInt8) {
-        guard let audioUnit = unsafeAvAudioUnits[trackIndex] else {
+        guard let audioUnit = getAudioUnit(for: trackIndex) else {
             return
         }
-        
+
         let command = UInt32(midiStatus)
-        let data1 = UInt32(midiData1) 
+        let data1 = UInt32(midiData1)
         let data2 = UInt32(midiData2)
-        
+
         let _ = MusicDeviceMIDIEvent(audioUnit.audioUnit, command, data1, data2, 0)
     }
     
