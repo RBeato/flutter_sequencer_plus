@@ -641,7 +641,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
 
         // Sync all tracks for new loop cycle
         for (var track in tracks) {
-          if (track.getEvents().isNotEmpty) {
+          if (track.events.isNotEmpty) {
             track.syncBuffer();
           }
         }
