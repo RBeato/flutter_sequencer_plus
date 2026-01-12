@@ -6,8 +6,9 @@ const SECONDS_PER_US = 1 / 1000000;
 const BUFFER_SIZE = 4096;
 
 /// Interval to "top off" each track's buffer, in milliseconds
-/// Faster refill cadence improves stability at loop wraps and pattern changes
-const TOP_OFF_PERIOD_MS = 250;
+/// PERFORMANCE: Increased from 250ms to 500ms to reduce FFI overhead by 50%
+/// 500ms (2x per second) is still frequent enough for smooth playback
+const TOP_OFF_PERIOD_MS = 500;
 
 /// "Lead frames" account for the fact that it may take some time to build the
 /// events and sync them with the native sequencer engine.
