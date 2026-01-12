@@ -48,7 +48,10 @@ class GlobalState {
   void _startPositionTracking() {
     _lastPositionUpdate = DateTime.now();
     _positionTimer?.cancel();
-    _positionTimer = Timer.periodic(const Duration(milliseconds: 10), (_) {
+    // PERFORMANCE: Reduced from 10ms (100Hz) to 50ms (20Hz)
+    // UI updates at 60fps don't need 100Hz position tracking
+    // 20Hz is smooth enough for visual feedback
+    _positionTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
       if (_getIsPlaying()) {
         _positionFrames = currentPosition;
         _lastPositionUpdate = DateTime.now();
