@@ -659,15 +659,15 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     }
   }
   
-  Set<String> _processedEvents = {}; // Track processed events with position-based deduplication
+  Set<int> _processedEvents = {}; // Track processed events with position-based deduplication (integer hash for performance)
   
   // PERFORMANCE OPTIMIZATION: Pre-computed event timeline
   List<ScheduledEvent> _eventTimeline = [];
   bool _timelineNeedsRebuild = true;
   double _lastTimelineStepCount = 0;
   double _lastTimelineTempo = 0;
-  // Retrigger guard per event key
-  final Map<String, int> _lastSentUs = {}; // key -> microseconds
+  // Retrigger guard per event key (integer hash for performance)
+  final Map<int, int> _lastSentUs = {}; // key -> microseconds
   static const int _minRetriggerUs = 8000; // 8ms guard
   
   void _processEventsAtBeat(double currentBeat) {
@@ -700,9 +700,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       final snappedBeat = (scheduledEvent.effectiveBeat).roundToDouble();
       final effectiveBeat = snappedBeat;
       
-      // Loop-aware deduplication: include robust loopCycle derived from absolute frames
+      // Loop-aware deduplication: PERFORMANCE - use integer hash instead of string
       final stepIndex = effectiveBeat.floor();
-      final eventKey = '${track.id}-${_loopCycle}-step$stepIndex-${event.midiData1}-${event.midiData2}';
+      // Pack into 32-bit: trackId(8) | loopCycle(8) | step(8) | note(8)
+      final eventKey = (track.id & 0xFF) << 24 | (_loopCycle & 0xFF) << 16 | (stepIndex & 0xFF) << 8 | (event.midiData1 & 0xFF);
       
       final nowUs = DateTime.now().microsecondsSinceEpoch;
       final lastUs = _lastSentUs[eventKey] ?? 0;
