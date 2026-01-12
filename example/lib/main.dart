@@ -764,8 +764,9 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
 
   handleToggleLoop() {
+    print('[DEBUG] 🔄 handleToggleLoop called - current isLooping: $isLooping');
     final nextIsLooping = !isLooping;
-
+    print('[DEBUG] 🔄 handleToggleLoop - toggling to: $nextIsLooping');
     handleSetLoop(nextIsLooping);
   }
 
