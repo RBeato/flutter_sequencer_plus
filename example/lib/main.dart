@@ -608,20 +608,53 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       _processEventsAtBeat(nativeBeat);
     }
     
-    // Check if we've reached the end (only for non-looping mode)
-    if (!isLooping && nativeBeat >= stepCount) {
-      print('[DEBUG] Reached end: nativeBeat=$nativeBeat stepCount=$stepCount isLooping=$isLooping');
-      print('[DEBUG] Stopping playback (loop is OFF)...');
-      // Stop playback and reset everything to beginning
-      _stopSimplePlayback();
-      
-      setState(() {
-        isPlaying = false;
-        position = 0.0;
-        isPaused = false;
-      });
-      
-      print('[DEBUG] Single playback ended');
+    // Check if we've reached the end
+    if (nativeBeat >= stepCount) {
+      if (!isLooping) {
+        // Non-looping mode: stop playback
+        print('[DEBUG] Reached end: nativeBeat=$nativeBeat stepCount=$stepCount isLooping=$isLooping');
+        print('[DEBUG] Stopping playback (loop is OFF)...');
+        _stopSimplePlayback();
+
+        setState(() {
+          isPlaying = false;
+          position = 0.0;
+          isPaused = false;
+        });
+
+        print('[DEBUG] Single playback ended');
+      } else {
+        // Looping mode: restart from beginning
+        print('[DEBUG] 🔁 Loop end reached: nativeBeat=$nativeBeat stepCount=$stepCount - Restarting...');
+        _loopCycle++;
+
+        // Reset position to start
+        _playbackStartTime = DateTime.now();
+        _playbackStartBeat = 0.0;
+        _pausedAtBeat = 0.0;
+        _lastProcessedBeat = null;
+        _processedEvents.clear();
+        _lastSentUs.clear();
+
+        // Reset native position
+        sequence.stop();
+
+        // Sync all tracks for new loop cycle
+        for (var track in tracks) {
+          if (track.getEvents().isNotEmpty) {
+            track.syncBuffer();
+          }
+        }
+
+        // Restart playback
+        sequence.play();
+
+        setState(() {
+          position = 0.0;
+        });
+
+        print('[DEBUG] 🔁 Loop restarted - cycle: $_loopCycle');
+      }
       return;
     }
   }
