@@ -1418,7 +1418,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     final wasPaused = isPaused;
     final currentPosition = position;
     final currentPausedAtBeat = _pausedAtBeat;
-    final backupProcessedEvents = Set<String>.from(_processedEvents);
+    final backupProcessedEvents = Set<int>.from(_processedEvents);
     
     print('[DEBUG] Storing playback state: playing=$wasPlaying paused=$wasPaused position=$currentPosition');
     
