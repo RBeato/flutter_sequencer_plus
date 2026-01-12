@@ -6,9 +6,10 @@ const SECONDS_PER_US = 1 / 1000000;
 const BUFFER_SIZE = 4096;
 
 /// Interval to "top off" each track's buffer, in milliseconds
-/// PERFORMANCE: Increased from 250ms to 500ms to reduce FFI overhead by 50%
-/// 500ms (2x per second) is still frequent enough for smooth playback
-const TOP_OFF_PERIOD_MS = 500;
+/// PERFORMANCE: Phase 3 optimization - Increased to 1000ms (1x per second)
+/// BUFFER_SIZE=4096 provides ~85ms buffer at 48kHz, so 1 second is very safe
+/// Reduces FFI overhead by 75% vs original 250ms
+const TOP_OFF_PERIOD_MS = 1000;
 
 /// "Lead frames" account for the fact that it may take some time to build the
 /// events and sync them with the native sequencer engine.

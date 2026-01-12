@@ -48,10 +48,10 @@ class GlobalState {
   void _startPositionTracking() {
     _lastPositionUpdate = DateTime.now();
     _positionTimer?.cancel();
-    // PERFORMANCE: Reduced from 10ms (100Hz) to 50ms (20Hz)
-    // UI updates at 60fps don't need 100Hz position tracking
-    // 20Hz is smooth enough for visual feedback
-    _positionTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+    // PERFORMANCE: Phase 3 - Optimized to 33ms (~30fps)
+    // Balances smooth UI updates with low CPU overhead
+    // 30fps matches typical animation frame rate for smooth visual feedback
+    _positionTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
       if (_getIsPlaying()) {
         _positionFrames = currentPosition;
         _lastPositionUpdate = DateTime.now();
