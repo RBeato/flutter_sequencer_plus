@@ -170,6 +170,7 @@ cd cpp_test && cmake . && make && ./build/sequencer_test  # C++ tests (if availa
 2. **Phase 2**: Position tracking 10ms → 50ms (80% reduction)
 3. **Phase 3**: TopOff timer 500ms → 1000ms, Position 50ms → 33ms (30fps)
 4. **Phase 4**: Integer hash event deduplication (3x faster than strings)
+5. **Phase 5**: Playback timer 1ms → 5ms (80% timer overhead reduction)
 
 **Performance Results**:
 - **Before**: 15-25% CPU (baseline Dart scheduling)
@@ -183,8 +184,9 @@ cd cpp_test && cmake . && make && ./build/sequencer_test  # C++ tests (if availa
 - ✅ All audio features working correctly
 - ✅ Zero crashes, production-ready
 
-**Commits** (8 total):
+**Commits** (9 total):
 ```bash
+7b0a11e ⚡ PERF Phase 5: Reduce timer frequency 1ms → 5ms
 074eef1 🐛 FIX: Update backup type to match new Set<int>
 577a94e ⚡ PERF Phase 4: Optimize event deduplication
 8a42487 ⚡ PERF Phase 3: Further timer optimizations
