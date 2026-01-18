@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **For production use, always use this branch:**
 - **Branch**: `performance/optimize-dart-scheduling`
+- **Commit**: `79123b4` (latest with Phase 5 optimization)
 - **Performance**: 6-9% CPU on iOS (65-75% improvement vs baseline)
 - **Status**: Production-ready, all features working, zero crashes
 - **GitHub**: https://github.com/RBeato/flutter_sequencer_plus/tree/performance/optimize-dart-scheduling
