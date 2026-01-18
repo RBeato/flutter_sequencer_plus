@@ -40,6 +40,7 @@ Pod::Spec.new do |s|
     'CLANG_CXX_LIBRARY' => 'libc++',
     'OTHER_CPLUSPLUSFLAGS' => '$(inherited) -std=c++17',
     'CLANG_ENABLE_MODULES' => 'NO',
+    'CLANG_X86_VECTOR_INSTRUCTIONS' => '', # Disable AVX to prevent -G flag error on iOS simulator
     'SWIFT_VERSION' => '5.0',
     'SWIFT_COMPILATION_MODE' => 'singlefile',
     'SWIFT_OPTIMIZATION_LEVEL' => '-Onone',
