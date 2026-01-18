@@ -428,8 +428,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     NativeBridge.play();
     sequence.play();
     
-    // Start ultra-low latency event processing 
-    _playbackTimer = Timer.periodic(Duration(milliseconds: 1), (timer) {
+    // Start optimized event processing (5ms = 200Hz, 80% less overhead than 1ms)
+    _playbackTimer = Timer.periodic(Duration(milliseconds: 5), (timer) {
       _processPlayback();
     });
     
@@ -510,10 +510,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     
     // Ensure engine is running
     NativeBridge.play();
-    
-    // OPTIMIZED TIMING: Use 1ms timer for ultra-low latency on both platforms
+
+    // OPTIMIZED TIMING: Use 5ms timer for excellent latency with 80% less overhead
     // Provides sub-millisecond accuracy for professional audio sequencing
-    _playbackTimer = Timer.periodic(Duration(milliseconds: 1), (timer) {
+    _playbackTimer = Timer.periodic(Duration(milliseconds: 5), (timer) {
       _processPlayback();
     });
     
@@ -1458,7 +1458,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       });
       
       // Restart optimized playback timer
-      _playbackTimer = Timer.periodic(Duration(milliseconds: 1), (timer) {
+      _playbackTimer = Timer.periodic(Duration(milliseconds: 5), (timer) {
         _processPlayback();
       });
       
