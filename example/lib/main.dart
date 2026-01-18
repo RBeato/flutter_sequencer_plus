@@ -626,7 +626,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       } else {
         // Looping mode: restart from beginning
         print('[DEBUG] 🔁 Loop end reached: nativeBeat=$nativeBeat stepCount=$stepCount - Restarting...');
-        _loopCycle++;
+        // NOTE: Don't increment _loopCycle here - it's already incremented by wrap detection (line 592)
+        // Incrementing twice causes step 0 events to have different eventKeys and bypass deduplication
 
         // Reset position to start
         _playbackStartTime = DateTime.now();
@@ -636,17 +637,11 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         _processedEvents.clear();
         _lastSentUs.clear();
 
-        // Reset native position
-        sequence.stop();
+        // Reset native position (setBeat automatically syncs buffers for all tracks)
+        sequence.pause();
+        sequence.setBeat(0.0);
 
-        // Sync all tracks for new loop cycle
-        for (var track in tracks) {
-          if (track.events.isNotEmpty) {
-            track.syncBuffer();
-          }
-        }
-
-        // Restart playback
+        // Restart playback (play() may clear buffers on iOS, which is correct)
         sequence.play();
 
         setState(() {
