@@ -1,15 +1,14 @@
 /// Seconds per microsecond
 const SECONDS_PER_US = 1 / 1000000;
 
-/// The size of the event buffer in the native backend
-/// Increased for fewer under-runs during fast passages and dense grids
-const BUFFER_SIZE = 4096;
+/// The size of the event buffer in the native backend.
+/// Must match the C++ Buffer<> template default (1024) in Buffer.h.
+const BUFFER_SIZE = 1024;
 
-/// Interval to "top off" each track's buffer, in milliseconds
-/// PERFORMANCE: Phase 3 optimization - Increased to 1000ms (1x per second)
-/// BUFFER_SIZE=4096 provides ~85ms buffer at 48kHz, so 1 second is very safe
-/// Reduces FFI overhead by 75% vs original 250ms
-const TOP_OFF_PERIOD_MS = 1000;
+/// Interval to "top off" each track's buffer, in milliseconds.
+/// With BUFFER_SIZE=1024, a typical 8-step loop at 120 BPM uses ~16 events
+/// per loop iteration, so 500ms provides comfortable headroom.
+const TOP_OFF_PERIOD_MS = 500;
 
 /// "Lead frames" account for the fact that it may take some time to build the
 /// events and sync them with the native sequencer engine.

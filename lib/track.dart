@@ -349,9 +349,8 @@ class Track {
     events.clear();
   }
 
-  /// Syncs events to the backend with optimized performance for loops.
-  /// This should be called after making changes to track events to ensure 
-  /// that the changes are synced immediately.
+  /// Syncs events to the backend. Call after making changes to track events
+  /// or when the playback position changes significantly.
   void syncBuffer(
       [int? absoluteStartFrame, int maxEventsToSync = BUFFER_SIZE]) {
     final position = NativeBridge.getPosition();
@@ -362,16 +361,11 @@ class Track {
       absoluteStartFrame = max(absoluteStartFrame, position);
     }
 
-    final positionDiff = (absoluteStartFrame - lastFrameSynced).abs();
-
-    // SEAMLESS LOOP FIX: NEVER clear events during looping to prevent audible restart
-    final isLooping = sequence.loopState != LoopState.Off;
-    final clearThreshold = isLooping ? 999999 : 100;
-
-    if (positionDiff > clearThreshold && !isLooping) {
-      _seqLog('syncBuffer: track $id clearing events, positionDiff=$positionDiff, startFrame=$absoluteStartFrame');
-      NativeBridge.clearEvents(id, absoluteStartFrame);
-    }
+    // Always clear future events before scheduling. This ensures new patterns
+    // replace old ones (critical for real-time editing during looped playback).
+    // clearEvents only removes events at or after absoluteStartFrame, so events
+    // currently being played by the audio thread are not affected.
+    NativeBridge.clearEvents(id, absoluteStartFrame);
 
     if (sequence.isPlaying) {
       final relativeStartFrame = absoluteStartFrame - sequence.engineStartFrame;
@@ -507,23 +501,17 @@ class Track {
         tempo,
         sequence.engineStartFrame + frameOffset);
     
-    // ANDROID REAL-TIME EDITING FIX: If buffer is full during playback, clear old events and retry
-    if (eventsSyncedCount == 0 && eventsToSync.isNotEmpty && sequence.isPlaying && Platform.isAndroid) {
-      // Android buffer full, clearing and retrying
-      
-      // Clear events that are more than 1 second in the past to make room for new events
+    // If buffer is full during playback, clear future events and retry
+    if (eventsSyncedCount == 0 && eventsToSync.isNotEmpty && sequence.isPlaying) {
       final currentFrame = NativeBridge.getPosition();
-      final clearBeforeFrame = currentFrame - (sampleRate * 1); // 1 second ago
-      NativeBridge.clearEvents(id, clearBeforeFrame);
-      
-      // Retry scheduling the events
+      NativeBridge.clearEvents(id, currentFrame);
+
       eventsSyncedCount = NativeBridge.scheduleEvents(
           id,
           eventsToSync,
           sampleRate,
           tempo,
           sequence.engineStartFrame + frameOffset);
-      // Buffer cleared, retrying events
     }
 
     if (eventsSyncedCount > 0) {

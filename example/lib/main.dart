@@ -1089,27 +1089,12 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       }
     });
     
-    // PERFORMANCE: Only sync buffer if events actually changed
+    // Sync buffer if events actually changed
     final eventCountChanged = (_trackEventCounts[trackId] ?? 0) != noteCount;
     if (eventCountChanged || wasTempoChange) {
-      // Platform-specific buffer sync
       track.syncBuffer();
-      
-      // REAL-TIME EDITING FIX: Force complete buffer clear and resync for Android during playback
-      // This ensures new events are properly scheduled without buffer conflicts
-      if (Platform.isAndroid && isPlaying && eventCountChanged) {
-        // Clear the entire track buffer and force complete resync
-        track.clearBuffer();
-        track.syncBuffer();
-        print('[SYNC-TRACK] Android real-time: Cleared buffer and forced complete resync for immediate event scheduling');
-
-        // Also clear timeline cache to ensure new events are processed
-        _timelineNeedsRebuild = true;
-        _processedEvents.clear(); // Allow new events to be processed immediately
-      }
-      
       _trackEventCounts[trackId] = noteCount;
-      _timelineNeedsRebuild = true; // Mark timeline for rebuild
+      _timelineNeedsRebuild = true;
     }
     
     // Clear dirty flag and update tempo tracking
