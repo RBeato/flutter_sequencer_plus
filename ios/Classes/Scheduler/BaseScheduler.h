@@ -1,17 +1,40 @@
 #ifndef BaseScheduler_h
 #define BaseScheduler_h
 #include <stdint.h>
+#include <stdio.h>
 
 typedef int32_t track_index_t;
+
+// Toggle main-thread debug logging: set to 1 to enable, 0 to disable
+#define SEQ_DEBUG 0
+
+// Toggle audio-thread debug logging: WARNING - printf is NOT real-time safe!
+// Only enable temporarily for debugging. Can cause CoreAudio watchdog kills.
+#define SEQ_AUDIO_DEBUG 0
+
+#if SEQ_DEBUG
+    #define SEQ_LOG(fmt, ...) printf("[SEQ-C++] " fmt "\n", ##__VA_ARGS__)
+#else
+    #define SEQ_LOG(fmt, ...) ((void)0)
+#endif
+
+#if SEQ_AUDIO_DEBUG
+    #define SEQ_AUDIO_LOG(fmt, ...) printf("[SEQ-AUDIO] " fmt "\n", ##__VA_ARGS__)
+#else
+    #define SEQ_AUDIO_LOG(fmt, ...) ((void)0)
+#endif
 
 #ifdef __cplusplus
 #include <memory>
 #include <unordered_map>
 #include <sys/time.h>
 #include <mutex>
+#include <atomic>
 #include <Buffer.h>
 #include <CallbackManager.h>
 #include <SchedulerEvent.h>
+
+static const int MAX_AUDIO_TRACKS = 128;
 
 class BaseScheduler {
 public:
@@ -35,12 +58,21 @@ public:
     position_frame_t getPosition();
     uint64_t getLastRenderTimeUs();
 protected:
+    // Lifetime management for buffers (main thread only, mutex-protected)
     std::unordered_map<track_index_t, std::shared_ptr<Buffer<>>> mBufferMap = {};
-    std::unordered_map<track_index_t, bool> mHasRenderedMap = {};
-    mutable std::mutex mBufferMutex; // Protects mBufferMap and mHasRenderedMap
+    mutable std::mutex mBufferMutex;
+
+    // Lock-free audio thread access - raw pointers into mBufferMap's shared_ptrs.
+    // Written by main thread (addTrack/removeTrack), read by audio thread (handleFrames).
+    // Safe because: pointer writes are atomic on all modern architectures,
+    // and we always set the pointer AFTER the buffer is fully constructed.
+    Buffer<>* mAudioBuffers[MAX_AUDIO_TRACKS] = {};
+
+    // Lock-free render tracking - replaces mHasRenderedMap
+    std::atomic<bool> mHasRendered[MAX_AUDIO_TRACKS] = {};
 private:
-    bool mIsPlaying = false;
-    position_frame_t mPositionFrames = 0;
+    std::atomic<bool> mIsPlaying{false};
+    std::atomic<position_frame_t> mPositionFrames{0};
 };
 
 #endif

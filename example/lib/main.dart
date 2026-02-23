@@ -148,8 +148,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   bool isPaused = false;
   int _loopCycle = 0; // increments on each loop wrap
   double? _lastProcessedBeat; // tracks previous beat for wrap detection
-  // PLATFORM-SPECIFIC SCHEDULING: iOS native bridge rejects events (returns 0), needs Dart scheduling
-  final bool _useNativeScheduling = !Platform.isIOS;
+  // All platforms now use native C++ scheduling (CocoaScheduler on iOS, AndroidEngine on Android)
+  final bool _useNativeScheduling = true;
   
   
   // Simple playback system
@@ -338,14 +338,9 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   void initState() {
     super.initState();
     
-    // PERFORMANCE OPTIMIZATION: Keep engine running for low latency
-    GlobalState().setKeepEngineRunning(true);
-    // PLATFORM-SPECIFIC: iOS native bridge rejects events, use Dart scheduling
-    GlobalState().setIosNativeSchedulingEnabled(false);
-    print('[INIT-DEBUG] Set iosNativeSchedulingEnabled to false, actual value: ${GlobalState().iosNativeSchedulingEnabled}');
+    // Native C++ scheduling enabled on all platforms
+    GlobalState().setIosNativeSchedulingEnabled(true);
     checkAsset();
-
-    GlobalState().setKeepEngineRunning(true);
     
     print('[DEBUG] Platform: ${Platform.isIOS ? "iOS" : "Android"}');
     print('[DEBUG] Initial state: isLooping=$isLooping (INITIAL_IS_LOOPING=$INITIAL_IS_LOOPING)');
@@ -404,36 +399,32 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
   
   void _startSimplePlayback() {
-    print('[TIMING-FIX] Starting corrected real-time playback...');
-    
+    print('[PLAYBACK] Starting fresh playback...');
+
     // Reset all state
     _playbackStartTime = DateTime.now();
     _playbackStartBeat = 0.0;
     _pausedAtBeat = 0.0;
-    // Reset loop cycle and event cache for deterministic first loop
     _loopCycle = 0;
     _lastProcessedBeat = null;
     _processedEvents.clear();
-    
+
     setState(() {
       position = 0.0;
       isPlaying = true;
       isPaused = false;
     });
-    
-    // Force sequence to start at beat 0.0 FIRST
-    sequence.setBeat(0.0);
-    
-    // Start native audio engine
-    NativeBridge.play();
-    sequence.play();
-    
-    // Start optimized event processing (5ms = 200Hz, 80% less overhead than 1ms)
-    _playbackTimer = Timer.periodic(Duration(milliseconds: 5), (timer) {
+
+    // NOTE: sequence.play() is called by handleTogglePlayPause after this method.
+    // It handles: setBeat(loopStart), syncAllBuffers, NativeBridge.play()
+    // Do NOT call NativeBridge.play() or sequence.play() here to avoid duplicate calls.
+
+    // Start UI position update timer (native scheduler handles all event dispatch)
+    _playbackTimer = Timer.periodic(Duration(milliseconds: 16), (timer) {
       _processPlayback();
     });
-    
-    print('[TIMING-FIX] Real-time playback started with native sync');
+
+    print('[PLAYBACK] Timer started, waiting for sequence.play()');
   }
   
   void _scheduleAllEventsToNativeEngine() {
@@ -481,176 +472,92 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
   
   void _pausePlayback() {
-    print('[DEBUG] Pausing playback system...');
+    print('[PLAYBACK] Pausing...');
     _playbackTimer?.cancel();
     _playbackTimer = null;
-    
-    // Save current position for resume
+
     _pausedAtBeat = position;
-    
-    // Pause the native engine
-    NativeBridge.pause();
-    
+
+    // NOTE: sequence.pause() is called by handleTogglePlayPause after this method.
+    // It handles: SchedulerPause, note-offs, NativeBridge.pause()
+    // Do NOT call NativeBridge.pause() here to avoid duplicate calls.
+
     setState(() {
       isPlaying = false;
       isPaused = true;
     });
-    
-    print('[DEBUG] Playback paused at beat $_pausedAtBeat');
+
+    print('[PLAYBACK] Paused at beat $_pausedAtBeat');
   }
   
   void _resumePlayback() {
-    print('[DEBUG] Resuming native audio playback from beat $_pausedAtBeat...');
-    // Native timing handles resume automatically
-    
+    print('[PLAYBACK] Resuming from beat $_pausedAtBeat...');
+
     setState(() {
       isPlaying = true;
       isPaused = false;
     });
-    
-    // Ensure engine is running
-    NativeBridge.play();
 
-    // OPTIMIZED TIMING: Use 5ms timer for excellent latency with 80% less overhead
-    // Provides sub-millisecond accuracy for professional audio sequencing
-    _playbackTimer = Timer.periodic(Duration(milliseconds: 5), (timer) {
+    // NOTE: sequence.play() is called by handleTogglePlayPause after this method.
+    // Do NOT call NativeBridge.play() here to avoid duplicate calls.
+
+    // Start UI position update timer
+    _playbackTimer = Timer.periodic(Duration(milliseconds: 16), (timer) {
       _processPlayback();
     });
-    
-    print('[DEBUG] Playback resumed from beat $_pausedAtBeat');
+
+    print('[PLAYBACK] Resumed');
   }
   
   void _stopSimplePlayback() {
-    print('[DEBUG] Stopping native audio playback...');
-    // Timer cleanup is no longer needed - using native timing
-    
-    // Send optimized note-off commands to only active tracks
-    int totalNotesOff = 0;
-    for (final track in tracks) {
-      // Only send note-off for commonly used drum/instrument notes instead of all 128
-      final noteOffEvents = <MidiEvent>[];
-      
-      // Common drum notes (36-81) and typical instrument range
-      for (int noteNumber = 36; noteNumber <= 81; noteNumber++) {
-        noteOffEvents.add(MidiEvent.ofNoteOff(beat: 0.0, noteNumber: noteNumber));
-      }
-      
-      if (noteOffEvents.isNotEmpty) {
-        NativeBridge.handleEventsNow(
-          track.id, 
-          noteOffEvents, 
-          GlobalState().sampleRate!, 
-          tempo
-        );
-        totalNotesOff += noteOffEvents.length;
-      }
-    }
-    print('[DEBUG] Sent $totalNotesOff note-offs to stop sustained sounds');
-    
-    // DON'T stop the engine - keep SF2s loaded!
-    print('[DEBUG] Keeping audio engine running to preserve SF2 loading');
+    print('[PLAYBACK] Stopping...');
+    _playbackTimer?.cancel();
+    _playbackTimer = null;
+    // NOTE: sequence.stop() / sequence.pause() sends all note-offs via CocoaEngine.
+    // Do NOT send handleEventsNow note-offs here — that would call MusicDeviceMIDIEvent
+    // from the main thread while the audio thread render callback may still be active.
   }
   
   // Track playback start time to ensure proper position
   DateTime? _playbackStartTime;
   
   void _processPlayback() {
-    // Only process if our internal state says we should be playing
     if (!isPlaying) return;
-    
-    // Initialize playback start time
+
     if (_playbackStartTime == null) {
       _playbackStartTime = DateTime.now();
     }
-    
-    // Get native beat from audio engine for accurate timing
+
+    // Read position from native audio engine (looped beat handled by C++ scheduler)
     final nativeBeat = sequence.getBeat(true);
-    // Position tracking for timing calculations (if needed)
-    
-    // Position tracking disabled for performance
-    
-    // REMOVED: Loop boundary event cache clearing (no longer needed without deduplication)
-    
-    // Update position from native audio engine
+
+    // Update UI position
     setState(() {
       position = nativeBeat;
     });
-    
-    // CROSS-PLATFORM LOOP CYCLE TRACKING: Track loop wraps for UI counter
+
+    // Track loop wraps for UI counter
     if (isLooping && isPlaying) {
-      // For looping, detect when we cross loop boundaries
       final previousBeat = _lastProcessedBeat ?? 0.0;
-      
-      // IMPROVED WRAP DETECTION: More robust logic for detecting loop boundaries
-      // Check if we've wrapped around (current beat is much smaller than previous)
       final significantBackward = previousBeat > 0.1 && nativeBeat < (previousBeat - 0.5);
-      // Check if we've crossed the step count boundary
       final crossedBoundary = (previousBeat >= (stepCount - 0.1)) && (nativeBeat <= 0.5);
-      final hasWrapped = significantBackward || crossedBoundary;
-      
-      if (hasWrapped) {
+
+      if (significantBackward || crossedBoundary) {
         _loopCycle++;
-        print('[LOOP-COUNTER] Loop wrap detected! Previous: $previousBeat, Current: $nativeBeat, Loop: $_loopCycle (Android: ${Platform.isAndroid})');
-        
-        // For iOS Dart scheduling, also clear caches
-        if (!_useNativeScheduling) {
-          _processedEvents.clear(); // Allow events to retrigger on new loop cycle
-          _lastSentUs.clear(); // Also clear timing guards
-        }
       }
-      
+
       _lastProcessedBeat = nativeBeat;
     }
-    
-    // iOS DART SCHEDULING: Process events in Dart since native bridge rejects events
-    // Timer: useNative=$_useNativeScheduling playing=$isPlaying
-    if (!_useNativeScheduling && isPlaying) {
-      _processEventsAtBeat(nativeBeat);
-    }
-    
-    // Check if we've reached the end
-    if (nativeBeat >= stepCount) {
-      if (!isLooping) {
-        // Non-looping mode: stop playback
-        print('[DEBUG] Reached end: nativeBeat=$nativeBeat stepCount=$stepCount isLooping=$isLooping');
-        print('[DEBUG] Stopping playback (loop is OFF)...');
-        _stopSimplePlayback();
 
-        setState(() {
-          isPlaying = false;
-          position = 0.0;
-          isPaused = false;
-        });
-
-        print('[DEBUG] Single playback ended');
-      } else {
-        // Looping mode: restart from beginning
-        print('[DEBUG] 🔁 Loop end reached: nativeBeat=$nativeBeat stepCount=$stepCount - Restarting...');
-        // NOTE: Don't increment _loopCycle here - it's already incremented by wrap detection (line 592)
-        // Incrementing twice causes step 0 events to have different eventKeys and bypass deduplication
-
-        // Reset position to start
-        _playbackStartTime = DateTime.now();
-        _playbackStartBeat = 0.0;
-        _pausedAtBeat = 0.0;
-        _lastProcessedBeat = null;
-        _processedEvents.clear();
-        _lastSentUs.clear();
-
-        // Reset native position (setBeat automatically syncs buffers for all tracks)
-        sequence.pause();
-        sequence.setBeat(0.0);
-
-        // Restart playback (play() may clear buffers on iOS, which is correct)
-        sequence.play();
-
-        setState(() {
-          position = 0.0;
-        });
-
-        print('[DEBUG] 🔁 Loop restarted - cycle: $_loopCycle');
-      }
-      return;
+    // Non-looping: check if we've reached the end (native looping wraps automatically)
+    if (!isLooping && nativeBeat >= stepCount) {
+      print('[PLAYBACK] Reached end at beat $nativeBeat, stopping');
+      _stopSimplePlayback();
+      setState(() {
+        isPlaying = false;
+        position = 0.0;
+        isPaused = false;
+      });
     }
   }
   
@@ -767,29 +674,20 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
 
   handleSetLoop(bool nextIsLooping) {
-    print('[DEBUG] handleSetLoop called: $nextIsLooping (current: $isLooping)');
-    
+    print('[LOOP] handleSetLoop: $nextIsLooping (current: $isLooping)');
+
     if (nextIsLooping) {
-      // PLATFORM-SPECIFIC APPROACH: iOS uses Dart-only looping, Android uses native
-      if (Platform.isIOS) {
-        // iOS: NO native looping - pure Dart scheduling handles loop cycles
-        print('[iOS-LOOP] Dart-only looping enabled: 0 to ${stepCount} beats (no native loop)');
-      } else {
-        // Android: Native looping + buffer sync approach
-        sequence.setLoop(0, stepCount.toDouble());
-        print('[ANDROID-LOOP] Native looping enabled: 0 to ${stepCount} beats');
-      }
+      // All platforms use native C++ scheduler for looping
+      sequence.setLoop(0, stepCount.toDouble());
+      print('[LOOP] Native looping enabled: 0 to $stepCount beats');
     } else {
-      // Disable looping on both platforms
       sequence.unsetLoop();
-      print('[LOOP-OFF] Disabled native looping');
+      print('[LOOP] Looping disabled');
     }
 
     setState(() {
       isLooping = nextIsLooping;
     });
-    
-    print('[DEBUG] handleSetLoop completed: isLooping=$isLooping');
   }
 
   handleToggleLoop() {

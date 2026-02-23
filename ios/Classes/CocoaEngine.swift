@@ -2,74 +2,58 @@ import Foundation
 import AVFoundation
 import Flutter
 
+// Toggle Swift-side debug logging: set to true to enable, false to disable
+let SEQ_SWIFT_DEBUG = false
+
+func seqLog(_ message: String) {
+    if SEQ_SWIFT_DEBUG {
+        print("[SEQ-Swift] \(message)")
+    }
+}
+
+/// High-performance iOS audio engine using AVAudioEngine + native C++ scheduler.
+/// Architecture matches Android: all event scheduling happens in C++ via render callbacks.
+/// Expected CPU: 3-5% for 8-track drum machine (down from 6-25% with old approach).
 public class CocoaEngine {
     var scheduler: UnsafeMutableRawPointer!
-    
+
     private let engine = AVAudioEngine()
     private var mixer: AVAudioUnit?
-    private let outputFormat: AVAudioFormat!
+    public let outputFormat: AVAudioFormat!
     private let registrar: FlutterPluginRegistrar!
 
-    // PERFORMANCE OPTIMIZATION: Thread-safe audio unit tracking with concurrent reads
+    // Thread-safe audio unit tracking
     private var unsafeAvAudioUnits: [track_index_t: AVAudioUnit] = [:]
     private let audioUnitsQueue = DispatchQueue(label: "com.flutter_sequencer.audiounits", attributes: .concurrent)
     private var nextTrackId: track_index_t = 0
     private let trackIdQueue = DispatchQueue(label: "com.flutter_sequencer.trackid")
-    
-    // CRITICAL FIX: Position tracking for audio-visual sync
-    private var playbackStartSampleTime: AVAudioFramePosition = 0
-    private var pausedAtSampleTime: AVAudioFramePosition = 0
-    private var isPlaying: Bool = false
-    private var isPaused: Bool = false
-    
-    // PROFESSIONAL AUDIO TIMING: Use native audio sample time instead of DateTime
-    private var audioTimebase: AVAudioFramePosition = 0
-    private var lastKnownSampleTime: AVAudioFramePosition = 0
-    // High-precision timing based on mach_absolute_time
-    private var startHostTime: UInt64 = 0
-    private var timebaseInfo = mach_timebase_info_data_t()
-    
+
     init(sampleRateCallbackPort: Dart_Port, registrar: FlutterPluginRegistrar) {
         self.registrar = registrar
-        
-        // PERFORMANCE OPTIMIZED: Configure audio session and engine for immediate playback
+        seqLog("CocoaEngine.init: starting")
+
+        // Configure audio session for sequencing (larger buffer = less CPU)
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            
-            // LOW-LATENCY: Set smallest possible buffer size for tighter timing
-            try session.setPreferredIOBufferDuration(0.005) // 5ms buffer (220 samples at 44.1kHz)
-            try session.setPreferredSampleRate(44100) // Lock to 44.1kHz
-            
+            try session.setPreferredIOBufferDuration(0.012)
+            try session.setPreferredSampleRate(44100)
             try session.setActive(true)
+            seqLog("AudioSession: sampleRate=\(session.sampleRate), ioBuffer=\(session.ioBufferDuration)s")
         } catch {
-            print("[ERROR] Audio session setup failed: \(error)")
+            seqLog("AudioSession: setup error: \(error)")
         }
-        
-        // Use optimized output format
+
         outputFormat = engine.outputNode.outputFormat(forBus: 0)
-        
-        // Skip scheduler for minimal latency
+        seqLog("OutputFormat: sampleRate=\(outputFormat.sampleRate), channels=\(outputFormat.channelCount)")
         self.scheduler = nil
         self.mixer = nil
-        
-        // Initialize timebase for mach_absolute_time conversions
-        mach_timebase_info(&timebaseInfo)
 
-        // CRITICAL: Start engine immediately to eliminate first-play delay
-        do {
-            engine.prepare()
-            try engine.start()
-        } catch {
-            print("[ERROR] Failed to pre-start engine: \(error)")
-        }
-        
-        // Send callback immediately to unblock Dart
-        callbackToDartInt32(sampleRateCallbackPort, Int32(outputFormat.sampleRate))
-        
         SfizzAU.registerAU()
+
+        initMixer(sampleRateCallbackPort: sampleRateCallbackPort)
     }
-    
+
     deinit {
         if engine.isRunning {
             engine.stop()
@@ -78,260 +62,12 @@ public class CocoaEngine {
             DestroyScheduler(scheduler)
         }
     }
-    
-    func addTrackSf2(sf2Path: String, isAsset: Bool, presetIndex: Int32, completion: @escaping (track_index_t) -> Void) {
-        let startTime = CFAbsoluteTimeGetCurrent()
-        print("[PERF] 🚀 Starting SF2 track creation: \(sf2Path)")
 
-        AudioUnitUtils.loadAudioUnits { [weak self] avAudioUnitComponents in
-            guard let self = self else {
-                completion(track_index_t(999))
-                return
-            }
+    // MARK: - Mixer & Scheduler Initialization
 
-            let appleSamplerComponent = avAudioUnitComponents.first(where: isAppleSampler)
-
-            if let appleSamplerComponent = appleSamplerComponent {
-                let auStartTime = CFAbsoluteTimeGetCurrent()
-
-                AudioUnitUtils.instantiate(
-                    description: appleSamplerComponent.audioComponentDescription,
-                    sampleRate: Double(self.outputFormat.sampleRate),
-                    options: [.loadOutOfProcess] // Performance optimization
-                ) { [weak self] (avAudioUnit: AVAudioUnit?) in
-                    guard let self = self else {
-                        completion(track_index_t(999))
-                        return
-                    }
-
-                    guard let avAudioUnit = avAudioUnit else {
-                        print("[PERF] ❌ AudioUnit instantiation failed")
-                        completion(track_index_t(999))
-                        return
-                    }
-
-                    let auTime = CFAbsoluteTimeGetCurrent() - auStartTime
-                    print("[PERF] ⏱️  AudioUnit instantiated in \(Int(auTime * 1000))ms")
-
-                    // PERFORMANCE: Execute SF2 loading on background queue, connection on main
-                    let loadStartTime = CFAbsoluteTimeGetCurrent()
-
-                    if let normalizedPath = self.normalizePath(sf2Path, isAsset: isAsset) {
-                        let url = URL(fileURLWithPath: normalizedPath)
-
-                        // Load SF2 on background thread
-                        DispatchQueue.global(qos: .userInitiated).async {
-                            loadSoundFont(avAudioUnit: avAudioUnit, soundFontURL: url, presetIndex: presetIndex)
-                            let loadTime = CFAbsoluteTimeGetCurrent() - loadStartTime
-                            print("[PERF] ⏱️  SF2 file loaded in \(Int(loadTime * 1000))ms")
-
-                            // Connection must happen on main thread
-                            DispatchQueue.main.async {
-                                let trackIndex = self.nextTrackIndex()
-
-                                // CRITICAL: Connect immediately and register AudioUnit
-                                self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
-
-                                self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
-
-                                let totalTime = CFAbsoluteTimeGetCurrent() - startTime
-                                print("[PERF] ✅ Track \(trackIndex) ready in \(Int(totalTime * 1000))ms")
-
-                                completion(trackIndex)
-                            }
-                        }
-                    } else {
-                        print("[PERF] ❌ Failed to normalize path: \(sf2Path)")
-                        completion(track_index_t(999))
-                    }
-                }
-            } else {
-                print("[PERF] ❌ Apple Sampler component not found")
-                completion(track_index_t(999))
-            }
-        }
-    }
-
-    // PERFORMANCE OPTIMIZATION: Parallel track creation for multiple SF2 files
-    func addMultipleTracksSf2Parallel(
-        tracks: [(path: String, isAsset: Bool, preset: Int32)],
-        completion: @escaping ([track_index_t]) -> Void
-    ) {
-        let startTime = CFAbsoluteTimeGetCurrent()
-        print("[PERF] 🚀 Starting parallel creation of \(tracks.count) tracks")
-
-        let dispatchGroup = DispatchGroup()
-        var trackIndices: [track_index_t] = Array(repeating: track_index_t(999), count: tracks.count)
-        let indicesQueue = DispatchQueue(label: "com.flutter_sequencer.indices")
-
-        for (index, trackInfo) in tracks.enumerated() {
-            dispatchGroup.enter()
-
-            // Each track loads in parallel
-            addTrackSf2(sf2Path: trackInfo.path, isAsset: trackInfo.isAsset, presetIndex: trackInfo.preset) { trackIndex in
-                indicesQueue.sync {
-                    trackIndices[index] = trackIndex
-                }
-                dispatchGroup.leave()
-            }
-        }
-
-        dispatchGroup.notify(queue: .main) {
-            let totalTime = CFAbsoluteTimeGetCurrent() - startTime
-            let successCount = trackIndices.filter { $0 < 999 }.count
-            print("[PERF] ✅ Parallel loading complete: \(successCount)/\(tracks.count) tracks in \(Int(totalTime * 1000))ms")
-            completion(trackIndices)
-        }
-    }
-    
-    func setTrackAudioUnit(trackIndex: track_index_t, avAudioUnit: AVAudioUnit) {
-        // Register with scheduler if available
-        if let scheduler = scheduler {
-            SchedulerSetTrackAudioUnit(scheduler, trackIndex, avAudioUnit.audioUnit)
-        }
-        updateAvAudioUnits(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
-    }
-    
-    func play() {
-        guard Thread.isMainThread else {
-            DispatchQueue.main.async { self.play() }
-            return
-        }
-        
-        // CRITICAL FIX: Handle pause/resume state properly
-        if isPaused {
-            // Resume from paused position
-            startHostTime = mach_absolute_time()
-            isPlaying = true
-            isPaused = false
-        } else if !isPlaying {
-            // Fresh start - CRITICAL: Reset to position 0 for loop start
-            playbackStartSampleTime = 0
-            pausedAtSampleTime = 0
-            startHostTime = mach_absolute_time()
-            isPlaying = true
-        } else {
-            // Already playing, ignore
-            return
-        }
-        
-        // Start scheduler if available
-        if let scheduler = scheduler {
-            SchedulerPlay(scheduler)
-        }
-        
-        // Engine should already be running, but ensure it's ready
-        if !engine.isRunning {
-            do {
-                engine.prepare()
-                try engine.start()
-            } catch {
-                print("[ERROR] Failed to start engine: \(error)")
-            }
-        }
-    }
-    
-    func pause() {
-        
-        guard Thread.isMainThread else {
-            DispatchQueue.main.async { self.pause() }
-            return
-        }
-        
-        // CRITICAL FIX: Save position for resume, don't reset  
-        if isPlaying {
-            // Calculate current position before pausing
-            let now = mach_absolute_time()
-            let elapsedSamples = hostTimeDeltaToSamples(startHostTime, now)
-            pausedAtSampleTime = playbackStartSampleTime + elapsedSamples
-            isPaused = true
-            isPlaying = false
-        } else {
-            // Full stop - reset everything
-            isPlaying = false
-            isPaused = false
-            playbackStartSampleTime = 0
-            pausedAtSampleTime = 0
-            startHostTime = 0
-        }
-        
-        // Pause scheduler if available
-        if let scheduler = scheduler {
-            SchedulerPause(scheduler)
-        }
-        
-        // CRITICAL FIX: Keep engine running to preserve SF2 AudioUnit connections
-        // Only send note-off messages to stop hanging notes, don't stop the engine (thread-safe)
-        if self.engine.isRunning {
-            let audioUnits = audioUnitsQueue.sync { Array(self.unsafeAvAudioUnits.values) }
-            for audioUnit in audioUnits {
-                for noteNumber in 0...127 {
-                    let noteOffCommand: UInt32 = 0x80 // Note Off, channel 0
-                    let _ = MusicDeviceMIDIEvent(audioUnit.audioUnit, noteOffCommand, UInt32(noteNumber), 0, 0)
-                }
-            }
-        }
-    }
-    
-    func stop() {
-        
-        guard Thread.isMainThread else {
-            DispatchQueue.main.async { self.stop() }
-            return
-        }
-        
-        // Reset all playback state
-        isPlaying = false
-        isPaused = false
-        playbackStartSampleTime = 0
-        pausedAtSampleTime = 0
-        startHostTime = 0
-        
-        // Stop scheduler if available
-        if let scheduler = scheduler {
-            SchedulerPause(scheduler)
-        }
-        
-        // Send note-off to all tracks (thread-safe)
-        if self.engine.isRunning {
-            let audioUnits = audioUnitsQueue.sync { Array(self.unsafeAvAudioUnits.values) }
-            for audioUnit in audioUnits {
-                for noteNumber in 0...127 {
-                    let noteOffCommand: UInt32 = 0x80
-                    let _ = MusicDeviceMIDIEvent(audioUnit.audioUnit, noteOffCommand, UInt32(noteNumber), 0, 0)
-                }
-            }
-        }
-        
-    }
-    
-    func getPosition() -> UInt32 {
-        // CRITICAL FIX: Return actual position for proper sync
-        if isPlaying {
-            let now = mach_absolute_time()
-            let elapsedSamples = hostTimeDeltaToSamples(startHostTime, now)
-            let currentSample = playbackStartSampleTime + elapsedSamples
-            return UInt32(max(0, currentSample))
-        } else if isPaused {
-            return UInt32(max(0, pausedAtSampleTime))
-        } else {
-            return 0
-        }
-    }
-
-    // Convert host time delta (mach) to samples using current output sample rate
-    private func hostTimeDeltaToSamples(_ start: UInt64, _ end: UInt64) -> AVAudioFramePosition {
-        let delta = end &- start
-        // Convert to nanoseconds: ns = t * numer / denom
-        let ns = (delta * UInt64(timebaseInfo.numer)) / UInt64(timebaseInfo.denom)
-        // seconds = ns / 1e9; samples = seconds * sampleRate
-        let seconds = Double(ns) / 1_000_000_000.0
-        let samples = seconds * outputFormat.sampleRate
-        return AVAudioFramePosition(samples)
-    }
-    
-    // Initialize mixer with callback for async completion
-    private func initMixer(completion: @escaping () -> Void) {
+    /// Creates a MultiChannelMixer AudioUnit, connects it to the output,
+    /// then creates the C++ CocoaScheduler and callbacks to Dart with the sample rate.
+    private func initMixer(sampleRateCallbackPort: Dart_Port) {
         let componentDescription = AudioComponentDescription(
             componentType: kAudioUnitType_Mixer,
             componentSubType: kAudioUnitSubType_MultiChannelMixer,
@@ -339,60 +75,326 @@ public class CocoaEngine {
             componentFlags: 0,
             componentFlagsMask: 0
         )
-        
-        AVAudioUnit.instantiate(with: componentDescription, options: []) { avAudioUnit, err in
-            if let error = err {
-                print("[ERROR] Failed to create mixer: \(error)")
-                self.mixer = nil
-                completion()
+
+        seqLog("initMixer: instantiating MultiChannelMixer...")
+        AVAudioUnit.instantiate(with: componentDescription, options: []) { [weak self] avAudioUnit, err in
+            guard let self = self else { return }
+
+            guard let mixerUnit = avAudioUnit, err == nil else {
+                seqLog("initMixer: FAILED to create mixer (err=\(String(describing: err))). Fallback mode.")
+                self.startEngineAndCallback(sampleRateCallbackPort)
                 return
             }
-            
-            self.mixer = avAudioUnit
-            
-            if let avAudioUnit = avAudioUnit {
-                let hardwareFormat = self.engine.outputNode.outputFormat(forBus: 0)
-                
-                self.engine.attach(avAudioUnit)
-                self.engine.connect(avAudioUnit, to: self.engine.outputNode, format: hardwareFormat)
-                
-                completion()
+
+            self.mixer = mixerUnit
+            seqLog("initMixer: mixer created, audioUnit=\(mixerUnit.audioUnit)")
+
+            let hardwareFormat = self.engine.outputNode.outputFormat(forBus: 0)
+            self.engine.attach(mixerUnit)
+            self.engine.connect(mixerUnit, to: self.engine.outputNode, format: hardwareFormat)
+
+            var busCount: UInt32 = 64
+            AudioUnitSetProperty(
+                mixerUnit.audioUnit,
+                kAudioUnitProperty_ElementCount,
+                kAudioUnitScope_Input,
+                0,
+                &busCount,
+                UInt32(MemoryLayout<UInt32>.size)
+            )
+
+            let sampleRate = Double(self.outputFormat.sampleRate)
+            self.scheduler = InitScheduler(mixerUnit.audioUnit, sampleRate)
+            seqLog("initMixer: scheduler created at \(self.scheduler!), sampleRate=\(sampleRate)")
+
+            self.startEngineAndCallback(sampleRateCallbackPort)
+        }
+    }
+
+    private func startEngineAndCallback(_ sampleRateCallbackPort: Dart_Port) {
+        do {
+            engine.prepare()
+            try engine.start()
+            seqLog("startEngine: AVAudioEngine started, isRunning=\(engine.isRunning)")
+        } catch {
+            seqLog("startEngine: AVAudioEngine start error: \(error)")
+        }
+
+        seqLog("startEngine: calling back to Dart with sampleRate=\(Int32(outputFormat.sampleRate))")
+        callbackToDartInt32(sampleRateCallbackPort, Int32(outputFormat.sampleRate))
+    }
+
+    // MARK: - Track Creation
+
+    func addTrackSf2(sf2Path: String, isAsset: Bool, presetIndex: Int32, completion: @escaping (track_index_t) -> Void) {
+        AudioUnitUtils.loadAudioUnits { [weak self] avAudioUnitComponents in
+            guard let self = self else {
+                completion(track_index_t(999))
+                return
+            }
+
+            guard let appleSamplerComponent = avAudioUnitComponents.first(where: isAppleSampler) else {
+                completion(track_index_t(999))
+                return
+            }
+
+            // CRITICAL: Load in-process for real-time safety.
+            // Out-of-process AUs use XPC, and MusicDeviceMIDIEvent on an XPC proxy
+            // allocates memory - NOT real-time safe when called from render callbacks.
+            // In-process AUs handle MusicDeviceMIDIEvent directly in the audio thread.
+            AudioUnitUtils.instantiate(
+                description: appleSamplerComponent.audioComponentDescription,
+                sampleRate: Double(self.outputFormat.sampleRate),
+                options: []
+            ) { [weak self] (avAudioUnit: AVAudioUnit?) in
+                guard let self = self, let avAudioUnit = avAudioUnit else {
+                    completion(track_index_t(999))
+                    return
+                }
+
+                if let normalizedPath = self.normalizePath(sf2Path, isAsset: isAsset) {
+                    let url = URL(fileURLWithPath: normalizedPath)
+
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        loadSoundFont(avAudioUnit: avAudioUnit, soundFontURL: url, presetIndex: presetIndex)
+
+                        DispatchQueue.main.async {
+                            let trackIndex = self.nextTrackIndex()
+                            self.connectAndRegisterTrack(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
+                            completion(trackIndex)
+                        }
+                    }
+                } else {
+                    completion(track_index_t(999))
+                }
             }
         }
     }
-    
-    // HIGH-PERFORMANCE connection optimized for immediate playback
-    private func performanceConnect(avAudioUnit: AVAudioUnit, trackIndex: track_index_t) {
-        do {
-            // Attach to engine
-            self.engine.attach(avAudioUnit)
-            
-            // Connect with optimal format
-            let format = avAudioUnit.outputFormat(forBus: 0)
-            self.engine.connect(avAudioUnit, to: self.engine.mainMixerNode, format: format)
-            
-            // Update tracking
-            updateAvAudioUnits(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
-            
-        } catch {
-            print("[ERROR] Performance connection failed: \(error)")
+
+    func addTrackSfz(sfzPath: UnsafePointer<CChar>, tuningPath: UnsafePointer<CChar>, completion: @escaping (track_index_t) -> Void) {
+        let sfizzAUDescription = SfizzAU.componentDescription
+
+        AudioUnitUtils.instantiate(
+            description: sfizzAUDescription,
+            sampleRate: Double(outputFormat.sampleRate),
+            options: []
+        ) { [weak self] (avAudioUnit: AVAudioUnit?) in
+            guard let self = self, let avAudioUnit = avAudioUnit else {
+                completion(track_index_t(999))
+                return
+            }
+
+            DispatchQueue.main.async {
+                if let sfizzAU = avAudioUnit.auAudioUnit as? SfizzAU,
+                   sfizzAU.loadSfzFile(path: sfzPath, tuningPath: tuningPath) {
+                    let trackIndex = self.nextTrackIndex()
+                    self.connectAndRegisterTrack(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
+                    completion(trackIndex)
+                } else {
+                    completion(track_index_t(999))
+                }
+            }
         }
     }
-    
-    // Helper to start engine when we have connected nodes (thread-safe)
-    private func startEngineIfNeeded() {
-        let hasUnits = audioUnitsQueue.sync { !self.unsafeAvAudioUnits.isEmpty }
-        if !self.engine.isRunning && hasUnits {
+
+    func addTrackSfzString(sampleRoot: UnsafePointer<CChar>, sfzString: UnsafePointer<CChar>, tuningString: UnsafePointer<CChar>, completion: @escaping (track_index_t) -> Void) {
+        let sfizzAUDescription = SfizzAU.componentDescription
+
+        AudioUnitUtils.instantiate(
+            description: sfizzAUDescription,
+            sampleRate: Double(outputFormat.sampleRate),
+            options: []
+        ) { [weak self] (avAudioUnit: AVAudioUnit?) in
+            guard let self = self, let avAudioUnit = avAudioUnit else {
+                completion(track_index_t(999))
+                return
+            }
+
+            DispatchQueue.main.async {
+                if let sfizzAU = avAudioUnit.auAudioUnit as? SfizzAU,
+                   sfizzAU.loadSfzString(sampleRoot: sampleRoot, sfzString: sfzString, tuningString: tuningString) {
+                    let trackIndex = self.nextTrackIndex()
+                    self.connectAndRegisterTrack(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
+                    completion(trackIndex)
+                } else {
+                    completion(track_index_t(999))
+                }
+            }
+        }
+    }
+
+    func addTrackAudioUnit(audioUnitId: String, completion: @escaping (track_index_t) -> Void) {
+        let isAppleDLS = audioUnitId.contains("Apple") || audioUnitId.contains("DLS") || audioUnitId.contains("dls")
+
+        AudioUnitUtils.loadAudioUnits { [weak self] avAudioUnitComponents in
+            guard let self = self else {
+                completion(track_index_t(999))
+                return
+            }
+
+            let targetComponent: AVAudioUnitComponent?
+            if isAppleDLS {
+                targetComponent = avAudioUnitComponents.first { component in
+                    let desc = component.audioComponentDescription
+                    return desc.componentManufacturer == kAudioUnitManufacturer_Apple &&
+                           desc.componentType == kAudioUnitType_MusicDevice &&
+                           desc.componentSubType == kAudioUnitSubType_MIDISynth
+                }
+            } else {
+                targetComponent = avAudioUnitComponents.first { component in
+                    component.name.lowercased().contains(audioUnitId.lowercased()) ||
+                    component.manufacturerName.lowercased().contains(audioUnitId.lowercased())
+                }
+            }
+
+            let componentToUse = targetComponent ?? avAudioUnitComponents.first { component in
+                component.audioComponentDescription.componentType == kAudioUnitType_MusicDevice
+            }
+
+            guard let audioUnitComponent = componentToUse else {
+                completion(track_index_t(999))
+                return
+            }
+
+            AudioUnitUtils.instantiate(
+                description: audioUnitComponent.audioComponentDescription,
+                sampleRate: Double(self.outputFormat.sampleRate),
+                options: []
+            ) { [weak self] (avAudioUnit: AVAudioUnit?) in
+                guard let self = self, let avAudioUnit = avAudioUnit else {
+                    completion(track_index_t(999))
+                    return
+                }
+
+                DispatchQueue.main.async {
+                    let trackIndex = self.nextTrackIndex()
+                    self.connectAndRegisterTrack(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
+                    completion(trackIndex)
+                }
+            }
+        }
+    }
+
+    // MARK: - Track Connection & Registration
+
+    /// Connects an AudioUnit to the mixer on the correct bus and registers it with the C++ scheduler.
+    /// This is the critical path that enables native scheduling.
+    private func connectAndRegisterTrack(avAudioUnit: AVAudioUnit, trackIndex: track_index_t) {
+        seqLog("connectTrack: track \(trackIndex), AU=\(avAudioUnit.audioUnit)")
+        self.engine.attach(avAudioUnit)
+
+        let format = avAudioUnit.outputFormat(forBus: 0)
+        seqLog("connectTrack: track \(trackIndex) format: sampleRate=\(format.sampleRate), ch=\(format.channelCount)")
+
+        if let mixerUnit = self.mixer {
+            self.engine.connect(avAudioUnit, to: mixerUnit, fromBus: 0, toBus: Int(trackIndex), format: format)
+            seqLog("connectTrack: track \(trackIndex) -> mixer bus \(trackIndex)")
+        } else {
+            self.engine.connect(avAudioUnit, to: self.engine.mainMixerNode, format: format)
+            seqLog("connectTrack: track \(trackIndex) -> mainMixer (NO custom mixer!)")
+        }
+
+        if let scheduler = self.scheduler {
+            SchedulerSetTrackAudioUnit(scheduler, trackIndex, avAudioUnit.audioUnit)
+            seqLog("connectTrack: track \(trackIndex) registered with scheduler")
+        } else {
+            seqLog("connectTrack: track \(trackIndex) - WARNING: scheduler is nil!")
+        }
+
+        updateAvAudioUnits(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
+
+        if !self.engine.isRunning {
             do {
                 try self.engine.start()
+                seqLog("connectTrack: restarted engine")
             } catch {
-                print("[ERROR] Failed to auto-start engine: \(error)")
+                seqLog("connectTrack: engine start error: \(error)")
             }
         }
     }
-    
-    
-    // THREAD-SAFE: Write operations use barrier for exclusive access
+
+    // MARK: - Playback Control
+
+    func play() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.play() }
+            return
+        }
+
+        seqLog("play(): scheduler=\(String(describing: scheduler)), engineRunning=\(engine.isRunning)")
+        if let scheduler = scheduler {
+            SchedulerPlay(scheduler)
+        } else {
+            seqLog("play(): WARNING - scheduler is nil!")
+        }
+
+        if !engine.isRunning {
+            do {
+                engine.prepare()
+                try engine.start()
+                seqLog("play(): engine restarted")
+            } catch {
+                seqLog("play(): engine start error: \(error)")
+            }
+        }
+    }
+
+    func pause() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.pause() }
+            return
+        }
+
+        seqLog("pause(): scheduler=\(String(describing: scheduler))")
+        if let scheduler = scheduler {
+            SchedulerPause(scheduler)
+        }
+
+        let audioUnits = audioUnitsQueue.sync { Array(self.unsafeAvAudioUnits.values) }
+        seqLog("pause(): sending note-off to \(audioUnits.count) tracks")
+        for audioUnit in audioUnits {
+            for noteNumber: UInt32 in 0...127 {
+                MusicDeviceMIDIEvent(audioUnit.audioUnit, 0x80, noteNumber, 0, 0)
+            }
+        }
+    }
+
+    func stop() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.stop() }
+            return
+        }
+
+        seqLog("stop()")
+        if let scheduler = scheduler {
+            SchedulerPause(scheduler)
+        }
+
+        let audioUnits = audioUnitsQueue.sync { Array(self.unsafeAvAudioUnits.values) }
+        for audioUnit in audioUnits {
+            for noteNumber: UInt32 in 0...127 {
+                MusicDeviceMIDIEvent(audioUnit.audioUnit, 0x80, noteNumber, 0, 0)
+            }
+        }
+    }
+
+    func getPosition() -> UInt32 {
+        if let scheduler = scheduler {
+            return SchedulerGetPosition(scheduler)
+        }
+        return 0
+    }
+
+    func removeTrack(trackIndex: track_index_t) -> Bool {
+        if let scheduler = scheduler {
+            SchedulerRemoveTrack(scheduler, trackIndex)
+        }
+        updateAvAudioUnits(trackIndex: trackIndex, avAudioUnit: nil)
+        return true
+    }
+
+    // MARK: - Utilities
+
     private func updateAvAudioUnits(trackIndex: track_index_t, avAudioUnit: AVAudioUnit?) {
         audioUnitsQueue.async(flags: .barrier) {
             if let avAudioUnit = avAudioUnit {
@@ -403,7 +405,6 @@ public class CocoaEngine {
         }
     }
 
-    // THREAD-SAFE: Track ID generation with serial queue
     private func nextTrackIndex() -> track_index_t {
         return trackIdQueue.sync {
             let trackIndex = nextTrackId
@@ -412,240 +413,12 @@ public class CocoaEngine {
         }
     }
 
-    // THREAD-SAFE: Read AudioUnit with concurrent access
-    private func getAudioUnit(for trackIndex: track_index_t) -> AVAudioUnit? {
-        return audioUnitsQueue.sync {
-            return self.unsafeAvAudioUnits[trackIndex]
-        }
-    }
-    
-    private func normalizePath(_ path: String, isAsset: Bool) -> String? {
-        if (!isAsset) {
+    func normalizePath(_ path: String, isAsset: Bool) -> String? {
+        if !isAsset {
             return path
         } else {
             let key = registrar.lookupKey(forAsset: path)
-            guard let normalizedPath = Bundle.main.path(forResource: key, ofType: nil) else {
-                print("Could not find asset resource for key: \(key) from path: \(path)")
-                return nil
-            }
-            return normalizedPath
+            return Bundle.main.path(forResource: key, ofType: nil)
         }
-    }
-    
-    // Send MIDI event to track (thread-safe)
-    func sendMIDIEvent(trackIndex: track_index_t, midiStatus: UInt8, midiData1: UInt8, midiData2: UInt8) {
-        guard let audioUnit = getAudioUnit(for: trackIndex) else {
-            return
-        }
-
-        let command = UInt32(midiStatus)
-        let data1 = UInt32(midiData1)
-        let data2 = UInt32(midiData2)
-
-        let _ = MusicDeviceMIDIEvent(audioUnit.audioUnit, command, data1, data2, 0)
-    }
-    
-    // Test function to play a note on a specific track
-    func playTestNote(trackIndex: track_index_t, noteNumber: UInt8 = 60, velocity: UInt8 = 100) {
-        sendMIDIEvent(trackIndex: trackIndex, midiStatus: 0x90, midiData1: noteNumber, midiData2: velocity)
-        
-        // Auto-stop note after 1 second
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            self.sendMIDIEvent(trackIndex: trackIndex, midiStatus: 0x80, midiData1: noteNumber, midiData2: 0)
-        }
-    }
-    
-    func addTrackSfz(sfzPath: UnsafePointer<CChar>, tuningPath: UnsafePointer<CChar>, completion: @escaping (track_index_t) -> Void) {
-        let sfzPathString = String(cString: sfzPath)
-        
-        // Create SfizzAU AudioUnit
-        let sfizzAUDescription = SfizzAU.componentDescription
-        
-        AudioUnitUtils.instantiate(
-            description: sfizzAUDescription,
-            sampleRate: Double(outputFormat.sampleRate),
-            options: [.loadOutOfProcess] // Performance optimization
-        ) { [weak self] (avAudioUnit: AVAudioUnit?) in
-            guard let self = self else {
-                completion(track_index_t(999))
-                return
-            }
-            
-            guard let avAudioUnit = avAudioUnit else {
-                completion(track_index_t(999))
-                return
-            }
-            
-            // PERFORMANCE: Execute on main thread for immediate connection
-            DispatchQueue.main.async {
-                // Cast to SfizzAU and load SFZ file
-                if let sfizzAU = avAudioUnit.auAudioUnit as? SfizzAU {
-                    // Load the SFZ file
-                    let loadResult = sfizzAU.loadSfzFile(path: sfzPath, tuningPath: tuningPath)
-                    
-                    if loadResult {
-                        let trackIndex = self.nextTrackIndex()
-                        
-                        // CRITICAL: Connect immediately and register AudioUnit
-                        self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
-                        
-                        self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
-                        
-                        completion(trackIndex)
-                    } else {
-                        completion(track_index_t(999))
-                    }
-                } else {
-                    completion(track_index_t(999))
-                }
-            }
-        }
-    }
-    
-    func addTrackSfzString(sampleRoot: UnsafePointer<CChar>, sfzString: UnsafePointer<CChar>, tuningString: UnsafePointer<CChar>, completion: @escaping (track_index_t) -> Void) {
-        
-        // Create SfizzAU AudioUnit
-        let sfizzAUDescription = SfizzAU.componentDescription
-        
-        AudioUnitUtils.instantiate(
-            description: sfizzAUDescription,
-            sampleRate: Double(outputFormat.sampleRate),
-            options: [.loadOutOfProcess] // Performance optimization
-        ) { [weak self] (avAudioUnit: AVAudioUnit?) in
-            guard let self = self else {
-                completion(track_index_t(999))
-                return
-            }
-            
-            guard let avAudioUnit = avAudioUnit else {
-                completion(track_index_t(999))
-                return
-            }
-            
-            // PERFORMANCE: Execute on main thread for immediate connection
-            DispatchQueue.main.async {
-                // Cast to SfizzAU and load SFZ string
-                if let sfizzAU = avAudioUnit.auAudioUnit as? SfizzAU {
-                    // Load the SFZ string
-                    let loadResult = sfizzAU.loadSfzString(sampleRoot: sampleRoot, sfzString: sfzString, tuningString: tuningString)
-                    
-                    if loadResult {
-                        let trackIndex = self.nextTrackIndex()
-                        
-                        // CRITICAL: Connect immediately and register AudioUnit
-                        self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
-                        
-                        self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
-                        
-                        completion(trackIndex)
-                    } else {
-                        completion(track_index_t(999))
-                    }
-                } else {
-                    completion(track_index_t(999))
-                }
-            }
-        }
-    }
-    
-    func addTrackAudioUnit(audioUnitId: String, completion: @escaping (track_index_t) -> Void) {
-        
-        // Parse audioUnitId (format: "manufacturer.component" or just look for Apple DLS)
-        let isAppleDLS = audioUnitId.contains("Apple") || audioUnitId.contains("DLS") || audioUnitId.contains("dls")
-        
-        AudioUnitUtils.loadAudioUnits { [weak self] avAudioUnitComponents in
-            guard let self = self else { 
-                completion(track_index_t(999))
-                return 
-            }
-            
-            // Look for Apple DLS Music Device specifically
-            let targetComponent: AVAudioUnitComponent?
-            
-            if isAppleDLS {
-                // Find Apple's DLS Music Device (built-in GM synthesizer)
-                targetComponent = avAudioUnitComponents.first { component in
-                    let desc = component.audioComponentDescription
-                    return desc.componentManufacturer == kAudioUnitManufacturer_Apple &&
-                           desc.componentType == kAudioUnitType_MusicDevice &&
-                           desc.componentSubType == kAudioUnitSubType_MIDISynth
-                }
-            } else {
-                // For other AudioUnits, try to find by name matching
-                targetComponent = avAudioUnitComponents.first { component in
-                    component.name.lowercased().contains(audioUnitId.lowercased()) ||
-                    component.manufacturerName.lowercased().contains(audioUnitId.lowercased())
-                }
-            }
-            
-            if let audioUnitComponent = targetComponent {
-                
-                AudioUnitUtils.instantiate(
-                    description: audioUnitComponent.audioComponentDescription,
-                    sampleRate: Double(self.outputFormat.sampleRate),
-                    options: [.loadOutOfProcess] // Performance optimization
-                ) { [weak self] (avAudioUnit: AVAudioUnit?) in
-                    guard let self = self else {
-                        completion(track_index_t(999))
-                        return
-                    }
-                    
-                    guard let avAudioUnit = avAudioUnit else {
-                        completion(track_index_t(999))
-                        return
-                    }
-                    
-                    // PERFORMANCE: Execute on main thread for immediate connection
-                    DispatchQueue.main.async {
-                        let trackIndex = self.nextTrackIndex()
-                        
-                        // CRITICAL: Connect immediately and register AudioUnit
-                        self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
-                        
-                        self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
-                        
-                        completion(trackIndex)
-                    }
-                }
-            } else {
-                // Try to find ANY available music device AudioUnit as fallback
-                let fallbackComponent = avAudioUnitComponents.first { component in
-                    let desc = component.audioComponentDescription
-                    return desc.componentType == kAudioUnitType_MusicDevice
-                }
-                
-                if let fallback = fallbackComponent {
-                    
-                    AudioUnitUtils.instantiate(
-                        description: fallback.audioComponentDescription,
-                        sampleRate: Double(self.outputFormat.sampleRate),
-                        options: [.loadOutOfProcess]
-                    ) { [weak self] (avAudioUnit: AVAudioUnit?) in
-                        guard let self = self else {
-                            completion(track_index_t(999))
-                            return
-                        }
-                        
-                        guard let avAudioUnit = avAudioUnit else {
-                            completion(track_index_t(999))
-                            return
-                        }
-                        
-                        DispatchQueue.main.async {
-                            let trackIndex = self.nextTrackIndex()
-                            self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
-                            self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
-                            completion(trackIndex)
-                        }
-                    }
-                } else {
-                    completion(track_index_t(999))
-                }
-            }
-        }
-    }
-    
-    func removeTrack(trackIndex: track_index_t) -> Bool {
-        return false
     }
 }

@@ -1,9 +1,16 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'constants.dart';
 import 'native_bridge.dart';
 import 'sequence.dart';
 import 'track.dart';
+
+void _seqLog(String message) {
+  if (DEBUG_SEQUENCER_LOGS) {
+    developer.log(message, name: 'SEQ-Dart');
+  }
+}
 
 /// A singleton that manages the global state of the sequencer engine. It is
 /// responsible for setting up, starting, and stopping the engine. It also
@@ -20,9 +27,8 @@ class GlobalState {
   }
 
   var keepEngineRunning = false;
-  // FIXED APPROACH: iOS needs Dart-based scheduling due to native bridge incompatibility
-  // iOS native bridge returns eventsSyncedCount=0, rejecting all events
-  bool iosNativeSchedulingEnabled = false;
+  // Native scheduling enabled for all platforms (iOS uses C++ CocoaScheduler)
+  bool iosNativeSchedulingEnabled = true;
   final sequenceIdMap = <int, Sequence>{};
   int? sampleRate;
   var isEngineReady = false;
@@ -53,7 +59,8 @@ class GlobalState {
     // 30fps matches typical animation frame rate for smooth visual feedback
     _positionTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
       if (_getIsPlaying()) {
-        _positionFrames = currentPosition;
+        // Read actual position from native scheduler (driven by render callbacks)
+        _positionFrames = NativeBridge.getPosition();
         _lastPositionUpdate = DateTime.now();
       }
     });
@@ -124,11 +131,14 @@ class GlobalState {
     if (sequence.isPlaying || sequence.getIsOver()) return;
 
     final shouldPlayEngine = !_getIsPlaying();
+    final position = NativeBridge.getPosition();
 
     sequence.isPlaying = true;
     sequence.engineStartFrame = LEAD_FRAMES +
-        NativeBridge.getPosition() -
+        position -
         sequence.beatToFrames(sequence.pauseBeat);
+
+    _seqLog('playSequence: id=$id, position=$position, engineStartFrame=${sequence.engineStartFrame}, pauseBeat=${sequence.pauseBeat}, shouldPlayEngine=$shouldPlayEngine');
 
     _syncAllBuffers();
 
@@ -147,8 +157,9 @@ class GlobalState {
     sequence.pauseBeat = sequence.getBeat();
     sequence.isPlaying = false;
 
+    _seqLog('pauseSequence: id=$id, pauseBeat=${sequence.pauseBeat}, shouldPauseEngine=$shouldPauseEngine');
+
     if (shouldPauseEngine) {
-      // All sequences are paused, pause engine
       _pauseEngine();
     }
 
@@ -170,9 +181,11 @@ class GlobalState {
   }
 
   void _setupEngine() async {
+    _seqLog('_setupEngine: starting');
     try {
       sampleRate = await NativeBridge.doSetup();
       isEngineReady = true;
+      _seqLog('_setupEngine: ready, sampleRate=$sampleRate');
       for (var callback in onEngineReadyCallbacks) {
         callback();
       }
@@ -181,7 +194,7 @@ class GlobalState {
         NativeBridge.play();
       }
     } catch (e) {
-      // Set a default sample rate so the app doesn't hang
+      _seqLog('_setupEngine: ERROR $e, using default sampleRate=44100');
       sampleRate = 44100;
       isEngineReady = true;
       for (var callback in onEngineReadyCallbacks) {
@@ -195,7 +208,7 @@ class GlobalState {
   }
 
   void _playEngine() {
-    // All sequences were paused, play engine
+    _seqLog('_playEngine: keepEngineRunning=$keepEngineRunning');
     if (!keepEngineRunning) NativeBridge.play();
     _startPositionTracking();
 
@@ -210,6 +223,7 @@ class GlobalState {
   }
 
   void _pauseEngine() {
+    _seqLog('_pauseEngine: keepEngineRunning=$keepEngineRunning');
     if (!keepEngineRunning) NativeBridge.pause();
 
     if (_topOffTimer != null) _topOffTimer!.cancel();
@@ -231,11 +245,9 @@ class GlobalState {
 
   /// Refills the underlying sequencer engine's event buffer to full capacity.
   void _topOffAllBuffers() {
-    // Each track's topOffBuffer() method handles platform-specific logic
-    // iOS dart-dispatch mode will skip, Android will execute
-    _getAllTracks().forEach((track) {
+    for (final track in _getAllTracks()) {
       track.topOffBuffer();
-    });
+    }
   }
 
   void _syncAllBuffers(

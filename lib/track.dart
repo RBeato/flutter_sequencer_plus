@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math';
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:path/path.dart' as p;
 
@@ -10,6 +11,12 @@ import 'models/events.dart';
 import 'models/instrument_error.dart';
 import 'native_bridge.dart';
 import 'sequence.dart';
+
+void _seqLog(String message) {
+  if (DEBUG_SEQUENCER_LOGS) {
+    developer.log(message, name: 'SEQ-Dart');
+  }
+}
 
 /// Represents a track. A track belongs to a sequence and has a collection of
 /// events.
@@ -347,12 +354,6 @@ class Track {
   /// that the changes are synced immediately.
   void syncBuffer(
       [int? absoluteStartFrame, int maxEventsToSync = BUFFER_SIZE]) {
-    // SURGICAL DEBUG: Track all sync operations
-    
-    // iOS dart-dispatch mode: do not schedule natively to avoid double triggers
-    if (Platform.isIOS && !Sequence.globalState.iosNativeSchedulingEnabled) {
-      return;
-    }
     final position = NativeBridge.getPosition();
 
     if (absoluteStartFrame == null) {
@@ -362,14 +363,13 @@ class Track {
     }
 
     final positionDiff = (absoluteStartFrame - lastFrameSynced).abs();
-    
+
     // SEAMLESS LOOP FIX: NEVER clear events during looping to prevent audible restart
-    // This restores the original flutter_sequencer "buffer topping off" behavior
     final isLooping = sequence.loopState != LoopState.Off;
-    final clearThreshold = isLooping ? 999999 : 100; // Extremely high threshold during loops
-    
+    final clearThreshold = isLooping ? 999999 : 100;
+
     if (positionDiff > clearThreshold && !isLooping) {
-      // Only clear events when NOT looping - this prevents the audible restart
+      _seqLog('syncBuffer: track $id clearing events, positionDiff=$positionDiff, startFrame=$absoluteStartFrame');
       NativeBridge.clearEvents(id, absoluteStartFrame);
     }
 
@@ -385,12 +385,6 @@ class Track {
   /// Triggers a sync that will fill any available space in the buffer with
   /// any un-synced events.
   void topOffBuffer() {
-    // SURGICAL DEBUG: Track top-off operations
-    
-    // iOS dart-dispatch mode: do not top-off native buffer
-    if (Platform.isIOS && !Sequence.globalState.iosNativeSchedulingEnabled) {
-      return;
-    }
     final bufferAvailableCount = NativeBridge.getBufferAvailableCount(id);
 
     if (bufferAvailableCount > 0) {
@@ -431,6 +425,7 @@ class Track {
     
     if (!isBeforeLoopEnd) {
       if (DEBUG_SEQUENCER_LOGS) {
+        _seqLog('_scheduleEventsOptimized: track $id, no loop, startFrame=$startFrame, endBeat=${sequence.endBeat}');
       }
       _scheduleEventsInRange(
           maxEventsToSync,
@@ -447,6 +442,7 @@ class Track {
     final loopEndFrame = sequence.beatToFrames(sequence.loopEndBeat);
 
     if (DEBUG_SEQUENCER_LOGS) {
+      _seqLog('_scheduleEventsOptimized: track $id, LOOP mode, loopsElapsed=$loopsElapsed, loopStart=$loopStartFrame, loopEnd=$loopEndFrame, loopLen=$loopLength');
     }
 
     var eventsSyncedCount = _scheduleEventsInRange(
@@ -462,6 +458,7 @@ class Track {
 
     while (eventsSyncedCount < maxEventsToSync && maxLoopIterations > 0) {
       if (DEBUG_SEQUENCER_LOGS) {
+        _seqLog('_scheduleEventsOptimized: track $id, loop iteration $loopIndex, synced=$eventsSyncedCount/$maxEventsToSync');
       }
       lastBatchCount = _scheduleEventsInRange(
           maxEventsToSync - eventsSyncedCount,
@@ -537,7 +534,7 @@ class Track {
         final firstEvent = eventsToSync.first;
         final firstFrame = sequence.beatToFrames(firstEvent.beat) + sequence.engineStartFrame + frameOffset;
         final lastAbs = lastEventFrame + sequence.engineStartFrame + frameOffset;
-        // Events synced successfully
+        _seqLog('_scheduleEventsInRange: track $id, synced=$eventsSyncedCount, frames=$firstFrame..$lastAbs, offset=$frameOffset');
       }
     }
 

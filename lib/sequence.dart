@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:developer' as developer;
 
 import 'constants.dart';
 import 'global_state.dart';
@@ -8,6 +9,12 @@ import 'models/instrument.dart';
 import 'models/instrument_error.dart';
 import 'native_bridge.dart';
 import 'track.dart';
+
+void _seqLog(String message) {
+  if (DEBUG_SEQUENCER_LOGS) {
+    developer.log(message, name: 'SEQ-Dart');
+  }
+}
 
 /// {@macro flutter_sequencer_library_private}
 enum LoopState {
@@ -100,21 +107,18 @@ class Sequence {
   void play() {
     if (!globalState.isEngineReady) return;
 
-    // CRITICAL FIX: When starting playback with loop enabled, always jump to loop start.
-    // This ensures pressing Play with Loop on starts from the first step of the loop
-    // rather than resuming from a previous paused position.
+    _seqLog('play: id=$id, isPlaying=$isPlaying, loopState=$loopState, pauseBeat=$pauseBeat');
+
     if (!isPlaying) {
       if (loopState != LoopState.Off) {
+        _seqLog('play: jumping to loopStartBeat=$loopStartBeat');
         setBeat(loopStartBeat);
       } else if (getIsOver()) {
+        _seqLog('play: sequence is over, resetting to beat 0');
         setBeat(0.0);
       }
     }
 
-    // If we rely on Dart dispatch on iOS, clear any native buffers to avoid double triggers
-    if (Platform.isIOS && !GlobalState().iosNativeSchedulingEnabled) {
-      getTracks().forEach((track) => track.clearBuffer());
-    }
     globalState.playSequence(id);
   }
 
@@ -123,24 +127,24 @@ class Sequence {
   void pause() {
     if (!globalState.isEngineReady) return;
 
-    // MINIMAL PAUSE: Just pause the sequence, don't reset tracks
+    _seqLog('pause: id=$id, beat=${getBeat()}');
     globalState.pauseSequence(id);
   }
 
   /// Stops playback of this sequence and resets its position to the beginning.
   void stop() {
+    _seqLog('stop: id=$id');
     pause();
     setBeat(0.0);
     GlobalState().resetPosition();
-    // MINIMAL STOP: Don't send individual note-offs that can cause corruption
   }
 
   /// Sets the tempo with optimized loop handling.
   void setTempo(double nextTempo) {
-    // OPTIMIZED: Skip expensive operations if tempo hasn't changed significantly
     if ((tempo - nextTempo).abs() < 0.01) {
       return;
     }
+    _seqLog('setTempo: id=$id, $tempo -> $nextTempo');
 
     // Update engine start frame to remove excess loops only if looping
     if (loopState == LoopState.BeforeLoopEnd) {
@@ -156,19 +160,15 @@ class Sequence {
 
     tempo = nextTempo;
 
-    // OPTIMIZED: Batch sync buffer operations to reduce overhead
-    if (!(Platform.isIOS && !GlobalState().iosNativeSchedulingEnabled)) {
-      final tracks = getTracks();
-      for (int i = 0; i < tracks.length; i++) {
-        tracks[i].syncBuffer();
-      }
+    final tracks = getTracks();
+    for (int i = 0; i < tracks.length; i++) {
+      tracks[i].syncBuffer();
     }
   }
 
   /// Enables looping with optimized performance.
   void setLoop(double loopStartBeat, double loopEndBeat) {
-    // If the sequence is over, ensure globalState is updated so the sequence
-    // doesn't start playing
+    _seqLog('setLoop: id=$id, start=$loopStartBeat, end=$loopEndBeat, prevState=$loopState');
     checkIsOver();
 
     // OPTIMIZED: Only update engine frame if we're actually transitioning from non-loop to loop
@@ -197,14 +197,12 @@ class Sequence {
     this.loopStartBeat = loopStartBeat;
     this.loopEndBeat = loopEndBeat;
 
-    // OPTIMIZED: Platform-specific buffer sync strategy
+    // Platform-specific buffer sync strategy
     // Android needs more frequent syncing to prevent note accumulation
-    final shouldSync = (Platform.isIOS && !GlobalState().iosNativeSchedulingEnabled)
-        ? false
-        : (Platform.isAndroid 
-            ? (!wasLooping || significantChange || (this.loopStartBeat != loopStartBeat) || (this.loopEndBeat != loopEndBeat))
-            : (!wasLooping || significantChange));
-        
+    final shouldSync = Platform.isAndroid
+        ? (!wasLooping || significantChange || (this.loopStartBeat != loopStartBeat) || (this.loopEndBeat != loopEndBeat))
+        : (!wasLooping || significantChange);
+
     if (shouldSync) {
       getTracks().forEach((track) => track.syncBuffer());
     }
@@ -212,7 +210,7 @@ class Sequence {
 
   /// Disables looping for the sequence with optimized performance.
   void unsetLoop() {
-    // OPTIMIZED: Only perform expensive operations if we were actually looping
+    _seqLog('unsetLoop: id=$id, prevState=$loopState');
     final wasLooping = loopState != LoopState.Off;
     
     if (wasLooping && loopState == LoopState.BeforeLoopEnd) {
@@ -224,8 +222,7 @@ class Sequence {
     loopEndBeat = 0;
     loopState = LoopState.Off;
 
-    // OPTIMIZED: Only sync buffers if we were actually looping
-    if (wasLooping && !(Platform.isIOS && !GlobalState().iosNativeSchedulingEnabled)) {
+    if (wasLooping) {
       getTracks().forEach((track) => track.syncBuffer());
     }
   }
@@ -240,7 +237,7 @@ class Sequence {
   void setBeat(double beat) {
     if (!globalState.isEngineReady) return;
 
-    // MINIMAL setBeat: Don't reset tracks to avoid corruption
+    _seqLog('setBeat: id=$id, beat=$beat, isPlaying=$isPlaying, loopState=$loopState');
 
     final leadFrames =
         getIsPlaying() ? min(_getFramesRendered(), LEAD_FRAMES) : 0;
@@ -250,11 +247,9 @@ class Sequence {
     engineStartFrame = NativeBridge.getPosition() - frame;
     pauseBeat = beat;
 
-    if (!(Platform.isIOS && !GlobalState().iosNativeSchedulingEnabled)) {
-      getTracks().forEach((track) {
-        track.syncBuffer(engineStartFrame);
-      });
-    }
+    getTracks().forEach((track) {
+      track.syncBuffer(engineStartFrame);
+    });
 
     if (loopState != LoopState.Off) {
       final loopEndFrame = beatToFrames(loopEndBeat);
@@ -348,8 +343,7 @@ class Sequence {
   /// Pauses this sequence if it is at its end.
   void checkIsOver() {
     if (isPlaying && getIsOver()) {
-      // Sequence is at end, pause
-
+      _seqLog('checkIsOver: id=$id, sequence ended at endBeat=$endBeat');
       pauseBeat = endBeat;
       pause();
     }

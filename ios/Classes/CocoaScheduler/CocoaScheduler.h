@@ -11,6 +11,13 @@ const int MAX_TRACKS = 128;
 #ifdef __cplusplus
 #include <thread>
 
+/// Heap-allocated render callback context.
+/// Stable pointer regardless of map rehashing - critical for audio thread safety.
+struct RenderRefCon {
+    track_index_t trackIndex;
+    void* scheduler; // CocoaScheduler*
+};
+
 class CocoaScheduler : public BaseScheduler {
 public:
     CocoaScheduler(AudioUnit _Nonnull mixerAudioUnit, double sampleRate);
@@ -18,7 +25,7 @@ public:
 
     void setTrackAudioUnit(track_index_t trackIndex, AudioUnit _Nonnull audioUnit);
     void onRemoveTrack(track_index_t trackIndex);
-    
+
     void onResetTrack(track_index_t trackIndex);
     void handleRenderAudioRange(track_index_t trackIndex, uint32_t offsetFrame, uint32_t numFramesToRender);
     void handleEvent(track_index_t trackIndex, SchedulerEvent event, position_frame_t offsetFrame);
@@ -27,18 +34,22 @@ public:
 private:
     double getSampleRate(AudioUnit _Nonnull audioUnit);
     double mSampleRate;
-    std::unordered_map<track_index_t, AudioUnit _Nonnull> mAudioUnitMap = {};
-    std::unordered_map<track_index_t, double> mSampleRateMap = {};
-    
-    // Pairs from this map will be used as the "inRefCon" variable for AudioUnitAddRenderNotify.
-    std::unordered_map<track_index_t, CocoaScheduler* _Nonnull> mInRefConMap = {};
+
+    // LOCK-FREE audio thread access: fixed-size arrays indexed by trackIndex.
+    // Written by main thread (setTrackAudioUnit/onRemoveTrack),
+    // read by audio thread (handleEvent/scaleFrames).
+    // Pointer and double writes are atomic on 64-bit architectures (ARM64/x86-64).
+    // Using arrays instead of unordered_map eliminates rehash-induced heap corruption.
+    AudioUnit mTrackAudioUnits[MAX_TRACKS] = {};
+    double mTrackSampleRates[MAX_TRACKS] = {};
+
+    // Render callback contexts - heap allocated for stable pointers.
+    // NOT freed during onRemoveTrack to avoid use-after-free in audio callbacks
+    // (AudioUnitRemoveRenderNotify does NOT guarantee callback has finished).
+    // Freed only in destructor when engine is fully stopped.
+    RenderRefCon* mTrackRefCons[MAX_TRACKS] = {};
 
     AudioUnit _Nonnull mMixerAudioUnit;
-};
-
-struct InRefCon {
-    CocoaScheduler* _Nonnull scheduler;
-    track_index_t trackIndex;
 };
 #endif
 

@@ -7,7 +7,7 @@ import CoreAudio
 
 // Type aliases for C++ types
 typealias track_index_t = UInt32
-typealias position_frame_t = UInt64
+typealias position_frame_t = UInt32
 typealias Dart_Port = Int64
 typealias SchedulerEvent = OpaquePointer
 typealias SfizzDSPKernelAdapter = OpaquePointer
