@@ -133,7 +133,7 @@ class VolumeEvent extends SchedulerEvent {
     required this.volume,
   }) : super(type: SchedulerEvent.VOLUME_EVENT);
 
-  final double? volume;
+  final double volume;
 
   VolumeEvent withFrame(int frame) {
     return VolumeEvent(
@@ -146,7 +146,7 @@ class VolumeEvent extends SchedulerEvent {
   ByteData serializeBytes(int sampleRate, double beat, int correctionFrames) {
     final data = super.serializeBytes(sampleRate, beat, correctionFrames);
 
-    data.setFloat32(SCHEDULER_EVENT_DATA_OFFSET, volume!, Endian.host);
+    data.setFloat32(SCHEDULER_EVENT_DATA_OFFSET, volume, Endian.host);
 
     return data;
   }

@@ -5,6 +5,7 @@
 typedef int32_t track_index_t;
 
 #ifdef __cplusplus
+#include <atomic>
 #include <memory>
 #include <unordered_map>
 #include <sys/time.h>
@@ -39,8 +40,8 @@ protected:
     std::unordered_map<track_index_t, bool> mHasRenderedMap = {};
     mutable std::mutex mBufferMutex; // Protects mBufferMap and mHasRenderedMap
 private:
-    bool mIsPlaying = false;
-    position_frame_t mPositionFrames = 0;
+    std::atomic<bool> mIsPlaying{false};
+    std::atomic<position_frame_t> mPositionFrames{0};
 };
 
 #endif

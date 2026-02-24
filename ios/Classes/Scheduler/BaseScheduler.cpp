@@ -5,14 +5,11 @@
 
 track_index_t BaseScheduler::addTrack() {
     std::lock_guard<std::mutex> lock(mBufferMutex);
-    auto maxTracks = std::numeric_limits<track_index_t>::max();
+    constexpr track_index_t maxTracks = 256; // reasonable limit for mobile
 
     for (track_index_t trackIndex = 0; trackIndex < maxTracks; trackIndex++) {
-        if (mBufferMap[trackIndex] == nullptr) {
-            auto buffer = std::make_shared<Buffer<>>();
-
-            mBufferMap[trackIndex] = buffer;
-
+        if (mBufferMap.find(trackIndex) == mBufferMap.end()) {
+            mBufferMap[trackIndex] = std::make_shared<Buffer<>>();
             return trackIndex;
         }
     }
@@ -151,8 +148,8 @@ void BaseScheduler::handleFrames(track_index_t trackIndex, uint32_t numFramesToR
         buffer = mBufferMap[trackIndex];
     }
 
-    auto originalPositionFrames = mPositionFrames; // so we can check if setPosition was called
-    auto startFrame = mPositionFrames;
+    auto originalPositionFrames = mPositionFrames.load(); // so we can check if setPosition was called
+    auto startFrame = mPositionFrames.load();
     auto lastFrameRendered = startFrame;
     uint32_t framesRendered = 0;
 
@@ -162,8 +159,9 @@ void BaseScheduler::handleFrames(track_index_t trackIndex, uint32_t numFramesToR
         auto eventFrame = nextEvent.frame;
         
         if (eventFrame < startFrame) {
-            // Skip events that are more than 1024 frames the past
-            if (eventFrame + 1024 < startFrame) {
+            // Skip events that are too far in the past (4096 frames ~= 93ms at 44.1kHz)
+            // Must exceed position tracking interval (33ms = ~1470 frames) plus scheduling latency
+            if (eventFrame + 4096 < startFrame) {
                 // printf("Track %i: Skipping event with frame %i, which is less than start frame %i\n", trackIndex, eventFrame, startFrame);
                 buffer->removeTop();
                 continue;

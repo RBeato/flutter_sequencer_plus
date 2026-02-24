@@ -7,9 +7,20 @@ import CoreAudio
 
 // Type aliases for C++ types
 typealias track_index_t = UInt32
-typealias position_frame_t = UInt64
+// MUST match C: typedef uint32_t position_frame_t (4 bytes)
+// Previous bug: was UInt64 (8 bytes) causing parameter size mismatch
+typealias position_frame_t = UInt32
 typealias Dart_Port = Int64
-typealias SchedulerEvent = OpaquePointer
+
+// SchedulerEvent must match C struct layout exactly (16 bytes total):
+//   position_frame_t frame (4 bytes) + uint32_t type (4 bytes) + uint8_t data[8] (8 bytes)
+// Previous bug: was OpaquePointer (8 bytes) causing heap corruption
+struct SchedulerEvent {
+    var frame: UInt32
+    var type: UInt32
+    var data: (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8)
+}
+
 typealias SfizzDSPKernelAdapter = OpaquePointer
 typealias Dart_CObject = OpaquePointer
 
@@ -89,6 +100,9 @@ func SchedulerClearEvents(_ scheduler: UnsafeMutableRawPointer, _ trackIndex: tr
 
 @_silgen_name("SchedulerGetPosition")
 func SchedulerGetPosition(_ scheduler: UnsafeMutableRawPointer) -> UInt32
+
+@_silgen_name("SchedulerStartGlobalCallback")
+func SchedulerStartGlobalCallback(_ scheduler: UnsafeMutableRawPointer)
 
 // C function declarations - Callback functions
 @_silgen_name("RegisterDart_PostCObject")

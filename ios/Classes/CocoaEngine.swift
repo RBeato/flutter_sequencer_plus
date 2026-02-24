@@ -49,10 +49,8 @@ public class CocoaEngine {
         // Use optimized output format
         outputFormat = engine.outputNode.outputFormat(forBus: 0)
         
-        // Skip scheduler for minimal latency
-        self.scheduler = nil
         self.mixer = nil
-        
+
         // Initialize timebase for mach_absolute_time conversions
         mach_timebase_info(&timebaseInfo)
 
@@ -63,10 +61,17 @@ public class CocoaEngine {
         } catch {
             print("[ERROR] Failed to pre-start engine: \(error)")
         }
-        
+
+        // Initialize C++ scheduler on the output node's AudioUnit
+        // AVAudioOutputNode (AVAudioIONode subclass) exposes audioUnit property
+        // Render callback fires once per buffer cycle — processes all tracks
+        let outputAU = engine.outputNode.audioUnit!
+        self.scheduler = InitScheduler(outputAU, outputFormat.sampleRate)
+        SchedulerStartGlobalCallback(self.scheduler)
+
         // Send callback immediately to unblock Dart
         callbackToDartInt32(sampleRateCallbackPort, Int32(outputFormat.sampleRate))
-        
+
         SfizzAU.registerAU()
     }
     
@@ -306,7 +311,11 @@ public class CocoaEngine {
     }
     
     func getPosition() -> UInt32 {
-        // CRITICAL FIX: Return actual position for proper sync
+        // Use scheduler position when available (sample-accurate from audio thread)
+        if let scheduler = scheduler {
+            return SchedulerGetPosition(scheduler)
+        }
+        // Fallback: mach_absolute_time estimation
         if isPlaying {
             let now = mach_absolute_time()
             let elapsedSamples = hostTimeDeltaToSamples(startHostTime, now)

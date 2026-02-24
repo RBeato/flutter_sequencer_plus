@@ -42,7 +42,7 @@ public:
 
     // Removes the value at the given index. Returns true if there was a value, false otherwise.
     bool remove(TIndex index) {
-        if (mArray[index].has_value()) {
+        if (index >= 0 && index < maxCount && mArray[index].has_value()) {
             mArray[index].reset();
 
             return true;

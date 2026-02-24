@@ -10,6 +10,7 @@ template <
     typename buffer_index_t = uint32_t
 >
 class Buffer {
+    static_assert((BUFFER_SIZE & (BUFFER_SIZE - 1)) == 0, "BUFFER_SIZE must be a power of 2");
 public:
     buffer_index_t add(const SchedulerEvent* eventsToAdd, buffer_index_t toAddCount) {
         if (toAddCount == 0) return 0;

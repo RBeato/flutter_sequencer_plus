@@ -16,7 +16,10 @@ VolumeEventData::VolumeEventData(uint8_t* data) {
 }
 
 void rawEventDataToEvents(const uint8_t* rawEventData, uint32_t eventsCount, struct SchedulerEvent* events) {
-    for (int32_t i = 0; i < eventsCount; i++) {
+    if (eventsCount == 0 || rawEventData == nullptr || events == nullptr) return;
+    // Cap to prevent unbounded reads (4x buffer size as safety margin)
+    if (eventsCount > 4096) eventsCount = 4096;
+    for (int32_t i = 0; i < (int32_t)eventsCount; i++) {
         const uint8_t* nextEventPtr = rawEventData + (i * sizeof(SchedulerEvent));
         
         events[i].frame = *(position_frame_t*)nextEventPtr;

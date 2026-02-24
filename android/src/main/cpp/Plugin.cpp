@@ -50,12 +50,13 @@ extern "C" {
         }
 
         // Use a detached thread to avoid blocking the calling thread
-        std::thread([=]() {
+        std::string filenameStr(filename);
+        std::thread([=, filenameStr = std::move(filenameStr)]() {
             try {
                 auto sf2Instrument = std::make_unique<SoundFontInstrument>();
                 setInstrumentOutputFormat(sf2Instrument.get());
 
-                auto didLoad = sf2Instrument->loadSf2File(filename, isAsset, presetIndex);
+                auto didLoad = sf2Instrument->loadSf2File(filenameStr.c_str(), isAsset, presetIndex);
 
                 if (didLoad) {
                     auto trackIndex = engine->mSchedulerMixer.addTrack(sf2Instrument.release());
@@ -78,16 +79,18 @@ extern "C" {
             return;
         }
 
+        std::string filenameStr(filename);
+        std::string tuningFilenameStr(tuningFilename);
         std::thread([=]() {
-            auto sfzInstrument = new SfizzSamplerInstrument();
-            setInstrumentOutputFormat(sfzInstrument);
+            auto sfzInstrument = std::make_unique<SfizzSamplerInstrument>();
+            setInstrumentOutputFormat(sfzInstrument.get());
 
-            auto didLoad = sfzInstrument->loadSfzFile(filename, tuningFilename);
+            auto didLoad = sfzInstrument->loadSfzFile(filenameStr.c_str(), tuningFilenameStr.c_str());
 
             if (didLoad) {
                 auto bufferSize = engine->getBufferSize();
                 sfzInstrument->setSamplesPerBlock(bufferSize);
-                auto trackIndex = engine->mSchedulerMixer.addTrack(sfzInstrument);
+                auto trackIndex = engine->mSchedulerMixer.addTrack(sfzInstrument.release());
 
                 callbackToDartInt32(callbackPort, trackIndex);
             } else {
@@ -108,16 +111,19 @@ extern "C" {
             return;
         }
 
+        std::string sampleRootStr(sampleRoot);
+        std::string sfzStringStr(sfzString);
+        std::string tuningStringStr(tuningString);
         std::thread([=]() {
-            auto sfzInstrument = new SfizzSamplerInstrument();
-            setInstrumentOutputFormat(sfzInstrument);
+            auto sfzInstrument = std::make_unique<SfizzSamplerInstrument>();
+            setInstrumentOutputFormat(sfzInstrument.get());
 
-            auto didLoad = sfzInstrument->loadSfzString(sampleRoot, sfzString, tuningString);
+            auto didLoad = sfzInstrument->loadSfzString(sampleRootStr.c_str(), sfzStringStr.c_str(), tuningStringStr.c_str());
 
             if (didLoad) {
                 auto bufferSize = engine->getBufferSize();
                 sfzInstrument->setSamplesPerBlock(bufferSize);
-                auto trackIndex = engine->mSchedulerMixer.addTrack(sfzInstrument);
+                auto trackIndex = engine->mSchedulerMixer.addTrack(sfzInstrument.release());
 
                 callbackToDartInt32(callbackPort, trackIndex);
             } else {
@@ -192,6 +198,7 @@ __attribute__((visibility("default"))) __attribute__((used))
             LOGE("Plugin: handle_events_now called without engine");
             return;
         }
+        if (eventsCount <= 0 || eventsCount > 4096) return;
 
         std::vector<SchedulerEvent> events(eventsCount);
         rawEventDataToEvents(eventData, eventsCount, events.data());
@@ -242,6 +249,7 @@ __attribute__((visibility("default"))) __attribute__((used))
         if (!check_engine()) {
             return -1;
         }
+        if (eventsCount <= 0 || eventsCount > 4096) return 0;
 
         std::vector<SchedulerEvent> events(eventsCount);
 

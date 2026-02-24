@@ -374,6 +374,7 @@ class Track {
   /// Clears any scheduled events in the backend.
   void clearBuffer() {
     NativeBridge.clearEvents(id, 0);
+    lastFrameSynced = 0;
   }
 
   /// Adds an event to the event list at the appropriate index given the sort
@@ -482,8 +483,8 @@ class Track {
         tempo,
         sequence.engineStartFrame + frameOffset);
     
-    // ANDROID REAL-TIME EDITING FIX: If buffer is full during playback, clear old events and retry
-    if (eventsSyncedCount == 0 && eventsToSync.isNotEmpty && sequence.isPlaying && Platform.isAndroid) {
+    // REAL-TIME EDITING FIX: If buffer is full during playback, clear old events and retry
+    if (eventsSyncedCount == 0 && eventsToSync.isNotEmpty && sequence.isPlaying) {
       // Android buffer full, clearing and retrying
       
       // Clear events that are more than 1 second in the past to make room for new events

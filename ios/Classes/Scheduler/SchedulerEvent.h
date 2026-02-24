@@ -5,7 +5,7 @@
 
 typedef uint32_t position_frame_t;
 
-const int SCHEDULER_EVENT_DATA_SIZE = 8;
+#define SCHEDULER_EVENT_DATA_SIZE 8
 
 struct SchedulerEvent {
     position_frame_t frame;

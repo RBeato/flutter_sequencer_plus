@@ -79,6 +79,7 @@ public:
 
     void handleRenderAudioRange(track_index_t trackIndex, uint32_t offsetFrame, uint32_t numFramesToRender) {
         if (numFramesToRender == 0) return;
+        if ((offsetFrame + numFramesToRender) * mChannelCount > kBufferSize) return;
 
         auto offsetMixingBuffer = mixingBuffer + offsetFrame * mChannelCount;
 
@@ -121,7 +122,11 @@ public:
     }
 
     void onRemoveTrack(track_index_t trackIndex) {
-        mTrackMap.erase(trackIndex);
+        auto it = mTrackMap.find(trackIndex);
+        if (it != mTrackMap.end()) {
+            delete it->second.track;
+            mTrackMap.erase(it);
+        }
     }
 
     std::optional<IInstrument*> getTrack(track_index_t trackIndex) {

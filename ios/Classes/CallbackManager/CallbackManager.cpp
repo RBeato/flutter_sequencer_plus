@@ -46,7 +46,7 @@ void callbackToDartInt32(Dart_Port callback_port, int32_t value) {
 void callbackToDartInt32Array(Dart_Port callbackPort, int length, int32_t* values) {
     if (dartPostCObject == NULL) return;
 
-    Dart_CObject *valueObjects[length];
+    std::vector<Dart_CObject*> valueObjects(length);
     int i;
     for (i = 0; i < length; ++i) {
         auto valueObject = new Dart_CObject;
@@ -59,7 +59,7 @@ void callbackToDartInt32Array(Dart_Port callbackPort, int length, int32_t* value
     Dart_CObject dart_object;
     dart_object.type = Dart_CObject_kArray;
     dart_object.value.as_array.length = length;
-    dart_object.value.as_array.values = valueObjects;
+    dart_object.value.as_array.values = valueObjects.data();
 
     bool result = dartPostCObject(callbackPort, &dart_object);
     if (!result) {

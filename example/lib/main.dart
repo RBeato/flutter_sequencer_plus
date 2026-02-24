@@ -37,21 +37,6 @@ class CustomSf2Instrument extends Sf2Instrument {
   String get displayName => customDisplayName;
 }
 
-// Performance-optimized event scheduling
-class ScheduledEvent {
-  final Track track;
-  final MidiEvent event;
-  final double originalBeat;
-  final double effectiveBeat;
-  
-  ScheduledEvent({
-    required this.track,
-    required this.event,
-    required this.originalBeat,
-    double? effectiveBeat,
-  }) : effectiveBeat = effectiveBeat ?? originalBeat;
-}
-
 // Custom SFZ instrument with display name
 class CustomSfzInstrument extends SfzInstrument {
   final String customDisplayName;
@@ -148,10 +133,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   bool isPaused = false;
   int _loopCycle = 0; // increments on each loop wrap
   double? _lastProcessedBeat; // tracks previous beat for wrap detection
-  // PLATFORM-SPECIFIC SCHEDULING: iOS native bridge rejects events (returns 0), needs Dart scheduling
-  final bool _useNativeScheduling = !Platform.isIOS;
-  
-  
   // Simple playback system
   Timer? _playbackTimer;
   
@@ -167,20 +148,24 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   static const int _rapidEditingThresholdMs = 500; // 500ms window for rapid editing detection
   
   // Available sound instruments (SF2 + SFZ + AudioUnit)
+  // 'sustain' = note duration in beats (default 0.9 for sustained, 0.25 for percussive)
   final List<Map<String, String>> _availableSoundFonts = [
-    {'name': 'J Piano', 'path': 'assets/sf2/j_piano.sf2', 'type': 'sf2'},
-    {'name': 'Rhodes Piano', 'path': 'assets/sf2/rhodes.sf2', 'type': 'sf2'},
-    {'name': 'Electric Guitar', 'path': 'assets/sf2/Electric_guitar.SF2', 'type': 'sf2'},
-    {'name': 'Bass Guitars', 'path': 'assets/sf2/BassGuitars.sf2', 'type': 'sf2'},
-    {'name': 'Korg Synth', 'path': 'assets/sf2/korg.sf2', 'type': 'sf2'},
-    {'name': 'General MIDI Bank', 'path': 'assets/sf2/GeneralUser-GS.sf2', 'type': 'sf2'},
-    {'name': 'Drums (Slavo)', 'path': 'assets/sf2/DrumsSlavo.sf2', 'type': 'sf2'},
+    {'name': 'J Piano', 'path': 'assets/sf2/j_piano.sf2', 'type': 'sf2', 'sustain': '0.9'},
+    {'name': 'Rhodes Piano', 'path': 'assets/sf2/rhodes.sf2', 'type': 'sf2', 'sustain': '0.9'},
+    {'name': 'Electric Guitar', 'path': 'assets/sf2/Electric_guitar.SF2', 'type': 'sf2', 'sustain': '0.8'},
+    {'name': 'Bass Guitars', 'path': 'assets/sf2/BassGuitars.sf2', 'type': 'sf2', 'sustain': '0.9'},
+    {'name': 'Korg Synth', 'path': 'assets/sf2/korg.sf2', 'type': 'sf2', 'sustain': '0.9'},
+    {'name': 'General MIDI Bank', 'path': 'assets/sf2/GeneralUser-GS.sf2', 'type': 'sf2', 'sustain': '0.9'},
+    {'name': 'Drums (Slavo)', 'path': 'assets/sf2/DrumsSlavo.sf2', 'type': 'sf2', 'sustain': '0.25'},
     // SFZ DISABLED: Causes crashes on iOS - needs further investigation of sfizz AudioUnit integration
-    // {'name': '🎹 SFZ Piano (sfizz)', 'path': 'assets/sfz/GMPiano.sfz', 'type': 'sfz', 'tuning': 'assets/sfz/meanquar.scl'},
+    // {'name': 'SFZ Piano (sfizz)', 'path': 'assets/sfz/GMPiano.sfz', 'type': 'sfz', 'tuning': 'assets/sfz/meanquar.scl', 'sustain': '0.9'},
     // TEMPORARY SAFETY FIX: Only enable AudioUnit on iOS Simulator to prevent physical device crashes
     // TODO: Re-enable on physical devices once AudioUnit loading is stable
-    // if (Platform.isIOS) {'name': '🍎 Apple AudioUnit (128 GM Sounds)', 'path': 'Apple.DLSMusicDevice', 'type': 'audiounit'},
+    // if (Platform.isIOS) {'name': 'Apple AudioUnit (128 GM Sounds)', 'path': 'Apple.DLSMusicDevice', 'type': 'audiounit', 'sustain': '0.9'},
   ];
+
+  // Per-track note duration (beats), populated from instrument 'sustain' values
+  final Map<int, double> _trackNoteDuration = {};
   
   // General MIDI instrument presets (GM standard)
   final List<Map<String, dynamic>> _generalMidiPresets = [
@@ -340,12 +325,9 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     
     // PERFORMANCE OPTIMIZATION: Keep engine running for low latency
     GlobalState().setKeepEngineRunning(true);
-    // PLATFORM-SPECIFIC: iOS native bridge rejects events, use Dart scheduling
-    GlobalState().setIosNativeSchedulingEnabled(false);
-    print('[INIT-DEBUG] Set iosNativeSchedulingEnabled to false, actual value: ${GlobalState().iosNativeSchedulingEnabled}');
+    // Both platforms use native C++ scheduling via render callbacks
+    GlobalState().setIosNativeSchedulingEnabled(true);
     checkAsset();
-
-    GlobalState().setKeepEngineRunning(true);
     
     print('[DEBUG] Platform: ${Platform.isIOS ? "iOS" : "Android"}');
     print('[DEBUG] Initial state: isLooping=$isLooping (INITIAL_IS_LOOPING=$INITIAL_IS_LOOPING)');
@@ -410,10 +392,9 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     _playbackStartTime = DateTime.now();
     _playbackStartBeat = 0.0;
     _pausedAtBeat = 0.0;
-    // Reset loop cycle and event cache for deterministic first loop
+    // Reset loop cycle for deterministic first loop
     _loopCycle = 0;
     _lastProcessedBeat = null;
-    _processedEvents.clear();
     
     setState(() {
       position = 0.0;
@@ -428,8 +409,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     NativeBridge.play();
     sequence.play();
     
-    // Start ultra-low latency event processing 
-    _playbackTimer = Timer.periodic(Duration(milliseconds: 1), (timer) {
+    // UI position updates at 60fps — audio timing is handled natively in C++ render callback
+    _playbackTimer = Timer.periodic(Duration(milliseconds: 16), (timer) {
       _processPlayback();
     });
     
@@ -511,9 +492,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     // Ensure engine is running
     NativeBridge.play();
     
-    // OPTIMIZED TIMING: Use 1ms timer for ultra-low latency on both platforms
-    // Provides sub-millisecond accuracy for professional audio sequencing
-    _playbackTimer = Timer.periodic(Duration(milliseconds: 1), (timer) {
+    // UI position updates at 60fps — audio timing is handled natively in C++ render callback
+    _playbackTimer = Timer.periodic(Duration(milliseconds: 16), (timer) {
       _processPlayback();
     });
     
@@ -590,22 +570,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       
       if (hasWrapped) {
         _loopCycle++;
-        print('[LOOP-COUNTER] Loop wrap detected! Previous: $previousBeat, Current: $nativeBeat, Loop: $_loopCycle (Android: ${Platform.isAndroid})');
-        
-        // For iOS Dart scheduling, also clear caches
-        if (!_useNativeScheduling) {
-          _processedEvents.clear(); // Allow events to retrigger on new loop cycle
-          _lastSentUs.clear(); // Also clear timing guards
-        }
+        print('[LOOP-COUNTER] Loop wrap detected! Previous: $previousBeat, Current: $nativeBeat, Loop: $_loopCycle');
       }
       
       _lastProcessedBeat = nativeBeat;
-    }
-    
-    // iOS DART SCHEDULING: Process events in Dart since native bridge rejects events
-    // Timer: useNative=$_useNativeScheduling playing=$isPlaying
-    if (!_useNativeScheduling && isPlaying) {
-      _processEventsAtBeat(nativeBeat);
     }
     
     // Check if we've reached the end (only for non-looping mode)
@@ -626,79 +594,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     }
   }
   
-  Set<String> _processedEvents = {}; // Track processed events with position-based deduplication
-  
-  // PERFORMANCE OPTIMIZATION: Pre-computed event timeline
-  List<ScheduledEvent> _eventTimeline = [];
-  bool _timelineNeedsRebuild = true;
-  double _lastTimelineStepCount = 0;
-  double _lastTimelineTempo = 0;
-  // Retrigger guard per event key
-  final Map<String, int> _lastSentUs = {}; // key -> microseconds
-  static const int _minRetriggerUs = 8000; // 8ms guard
-  
-  void _processEventsAtBeat(double currentBeat) {
-    // SURGICAL DEBUG: Track Dart event processing
-    // Processing Dart events for beat $currentBeat
-    
-    // CRITICAL FIX: iOS loop audio requires active Dart-side event processing
-    // This was disabled as "no-op" causing loop audio to disappear after first cycle
-    
-    // PERFORMANCE OPTIMIZATION: Use pre-computed event timeline instead of scanning all events
-    _ensureEventTimeline();
-    // Event timeline contains ${_eventTimeline.length} events
-    
-    // LOOKAHEAD SCHEDULING: Process events slightly ahead of time to reduce FFI latency
-    final lookaheadMs = 5.0; // 5ms lookahead for professional timing
-    final lookaheadBeats = (lookaheadMs / 1000.0) * (tempo / 60.0);
-    // IMPORTANT: when looping, do NOT look behind at cycle start, to avoid previous-cycle duplicates
-    final bool nearLoopStart = isLooping && (currentBeat % stepCount) < 0.25;
-    final scheduleWindowStart = nearLoopStart ? currentBeat : currentBeat - 0.2;
-    final scheduleWindowEnd = currentBeat + lookaheadBeats + 0.2;
-    
-    // OPTIMIZED: Process only events in current time window using binary search
-    final eventsToProcess = _getEventsInTimeWindow(scheduleWindowStart, scheduleWindowEnd, currentBeat);
-    // Scheduling window: ${eventsToProcess.length} events found
-    
-    for (final scheduledEvent in eventsToProcess) {
-      final event = scheduledEvent.event;
-      final track = scheduledEvent.track;
-      // Snap effectiveBeat to nearest step index to stabilize dedup at integer steps
-      final snappedBeat = (scheduledEvent.effectiveBeat).roundToDouble();
-      final effectiveBeat = snappedBeat;
-      
-      // Loop-aware deduplication: include robust loopCycle derived from absolute frames
-      final stepIndex = effectiveBeat.floor();
-      final eventKey = '${track.id}-${_loopCycle}-step$stepIndex-${event.midiData1}-${event.midiData2}';
-      
-      final nowUs = DateTime.now().microsecondsSinceEpoch;
-      final lastUs = _lastSentUs[eventKey] ?? 0;
-      final withinGuard = (nowUs - lastUs) < _minRetriggerUs;
-      final isProcessed = _processedEvents.contains(eventKey);
-      
-      // Event at beat ${effectiveBeat.toStringAsFixed(3)}: processed=$isProcessed
-      
-      if (!isProcessed && !withinGuard) {
-        _processedEvents.add(eventKey);
-        _lastSentUs[eventKey] = nowUs;
-        // SEND log for verification at loop start
-        final stepNumber = stepIndex;
-        if (DEBUG_SEQUENCER_LOGS && stepNumber == 0 && (event.midiStatus & 0xF0) == 0x90 && event.midiData2 > 0) {
-          // Sent: track=${track.id} note=${event.midiData1} at ${effectiveBeat.toStringAsFixed(3)}
-        }
-        
-        NativeBridge.handleEventsNow(
-          track.id,
-          [event],
-          GlobalState().sampleRate!,
-          tempo,
-        );
-      }
-    }
-    
-    // REMOVED: No longer need to clean up processed events (deduplication disabled)
-  }
-
   handleStop() {
     print('[DEBUG] handleStop called');
     _stopSimplePlayback();
@@ -738,29 +633,16 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
 
   handleSetLoop(bool nextIsLooping) {
-    print('[DEBUG] handleSetLoop called: $nextIsLooping (current: $isLooping)');
-    
     if (nextIsLooping) {
-      // PLATFORM-SPECIFIC APPROACH: iOS uses Dart-only looping, Android uses native
-      if (Platform.isIOS) {
-        // iOS: NO native looping - pure Dart scheduling handles loop cycles
-        print('[iOS-LOOP] Dart-only looping enabled: 0 to ${stepCount} beats (no native loop)');
-      } else {
-        // Android: Native looping + buffer sync approach
-        sequence.setLoop(0, stepCount.toDouble());
-        print('[ANDROID-LOOP] Native looping enabled: 0 to ${stepCount} beats');
-      }
+      // Both platforms use native looping via C++ scheduler
+      sequence.setLoop(0, stepCount.toDouble());
     } else {
-      // Disable looping on both platforms
       sequence.unsetLoop();
-      print('[LOOP-OFF] Disabled native looping');
     }
 
     setState(() {
       isLooping = nextIsLooping;
     });
-    
-    print('[DEBUG] handleSetLoop completed: isLooping=$isLooping');
   }
 
   handleToggleLoop() {
@@ -866,7 +748,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   /// Adds events without disrupting the currently playing sequence
   void _addEventRealTime(Track track, int step, int noteNumber, double velocity) {
     final currentTempo = sequence.getTempo();
-    final noteDuration = _calculateNoteDuration(currentTempo);
+    final noteDuration = _trackNoteDuration[track.id] ?? _calculateNoteDuration(currentTempo);
     final beat = step.toDouble();
 
     print('[REAL-TIME] Processing event: step=$step, note=$noteNumber, vel=$velocity, beat=$beat');
@@ -937,24 +819,24 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     print('[NATIVE] Pre-scheduling all events into native buffers...');
     
     final currentTempo = sequence.getTempo();
-    final noteDuration = _calculateNoteDuration(currentTempo);
     final sampleRate = 44100; // Default sample rate
-    
+
     int totalEventsScheduled = 0;
-    
+
     for (final track in tracks) {
       final trackId = track.id;
+      final noteDuration = _trackNoteDuration[trackId] ?? _calculateNoteDuration(currentTempo);
       final stepSequencerState = trackStepSequencerStates[trackId];
       if (stepSequencerState == null) continue;
-      
+
       List<SchedulerEvent> eventsToSchedule = [];
-      
+
       // Use the iterateEvents method to get all velocity data
       stepSequencerState.iterateEvents((step, noteNumber, velocity) {
         if (step < stepCount && velocity > 0) {
           final beat = step.toDouble();
           final midiVelocity = (velocity * 127).round().clamp(1, 127);
-          
+
           // Note ON event
           eventsToSchedule.add(MidiEvent(
             beat: beat,
@@ -962,8 +844,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
             midiData1: noteNumber,
             midiData2: midiVelocity,
           ));
-          
-          // Note OFF event 
+
+          // Note OFF event
           eventsToSchedule.add(MidiEvent(
             beat: beat + noteDuration,
             midiStatus: 0x80, // Note OFF
@@ -999,8 +881,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   
   void markTrackDirty(int trackId, {int? newStep, int? newNoteNumber, double? newVelocity}) {
     _tracksDirty[trackId] = true;
-    _timelineNeedsRebuild = true;
-    
+
     print('[DEBUG-MARK-DIRTY] markTrackDirty called: trackId=$trackId, newStep=$newStep, newNote=$newNoteNumber, newVelocity=$newVelocity, isPlaying=$isPlaying, Platform.isAndroid=${Platform.isAndroid}');
     
     // ANDROID REAL-TIME EDITING: Handle both note addition and removal
@@ -1023,23 +904,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       }
     }
     
-    // CROSS-PLATFORM REAL-TIME EDITING FIX
-    if (isPlaying) {
-      if (Platform.isAndroid) {
-        // Android uses hybrid approach: immediate feedback + track sync
-        print('[ANDROID-HYBRID] Using hybrid approach - immediate feedback + track sync');
-
-        // Clear timeline cache for immediate event processing
-        _timelineNeedsRebuild = true;
-      } else {
-        // iOS uses Dart scheduling - just clear caches
-        _processedEvents.clear();
-        _lastSentUs.clear();
-        print('[iOS-HYBRID] Cleared event caches for immediate processing');
-      }
-    } else {
-      print('[DEBUG-MARK-DIRTY] Not calling real-time editing because isPlaying=false');
-    }
   }
   
   // RAPID EDITING DETECTION: Prevents clearEvents() race conditions during fast UI interaction
@@ -1128,7 +992,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   void syncTrack(Track track) {
     final trackId = track.id;
     final currentTempo = sequence.getTempo();
-    final noteDuration = _calculateNoteDuration(currentTempo);
+    // Use per-track duration if set, otherwise fall back to global calculation
+    final noteDuration = _trackNoteDuration[trackId] ?? _calculateNoteDuration(currentTempo);
     
     // PERFORMANCE: Skip sync if track hasn't changed and tempo is stable
     final wasTempoChange = (_trackLastSyncTempo[trackId] ?? 0.0 - currentTempo).abs() > 0.01;
@@ -1167,21 +1032,20 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       // Platform-specific buffer sync
       track.syncBuffer();
       
-      // REAL-TIME EDITING FIX: Force complete buffer clear and resync for Android during playback
-      // This ensures new events are properly scheduled without buffer conflicts
-      if (Platform.isAndroid && isPlaying && eventCountChanged) {
-        // Clear the entire track buffer and force complete resync
-        track.clearBuffer();
+      // REAL-TIME EDITING FIX: Graceful buffer update during playback
+      if (isPlaying && eventCountChanged) {
+        final sr = GlobalState().sampleRate ?? 44100;
+        // 1. Send all-notes-off (CC 123) to kill any sustaining notes on this track
+        final allNotesOff = [MidiEvent.cc(beat: 0, ccNumber: 123, ccValue: 0)];
+        NativeBridge.handleEventsNow(trackId, allNotesOff, sr, currentTempo);
+        // 2. Clear only FUTURE events (from current position), preserving imminent note-offs
+        final currentPos = NativeBridge.getPosition();
+        NativeBridge.clearEvents(trackId, currentPos);
+        track.lastFrameSynced = 0;
         track.syncBuffer();
-        print('[SYNC-TRACK] Android real-time: Cleared buffer and forced complete resync for immediate event scheduling');
-
-        // Also clear timeline cache to ensure new events are processed
-        _timelineNeedsRebuild = true;
-        _processedEvents.clear(); // Allow new events to be processed immediately
       }
-      
+
       _trackEventCounts[trackId] = noteCount;
-      _timelineNeedsRebuild = true; // Mark timeline for rebuild
     }
     
     // Clear dirty flag and update tempo tracking
@@ -1303,15 +1167,22 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         selectedTrack = newTracks.isNotEmpty ? newTracks[0] : null;
         
         // Initialize sequencer states for all tracks
-        newTracks.forEach((track) {
+        for (var i = 0; i < newTracks.length; i++) {
+          final track = newTracks[i];
           trackStepSequencerStates[track.id] = StepSequencerState();
           trackVolumes[track.id] = 0.7; // Set default volume
-          
+
+          // Set per-track note duration from instrument config
+          if (i < _availableSoundFonts.length) {
+            final sustain = double.tryParse(_availableSoundFonts[i]['sustain'] ?? '0.9') ?? 0.9;
+            _trackNoteDuration[track.id] = sustain;
+          }
+
           // IMPORTANT: Actually set the volume on the native track object
           track.changeVolumeNow(volume: 0.8); // Higher volume for better audibility
           // Ensure buffer is synced for both platforms
           track.syncBuffer();
-        });
+        }
       });
       
       if (newTracks.isEmpty) {
@@ -1383,8 +1254,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     final wasPaused = isPaused;
     final currentPosition = position;
     final currentPausedAtBeat = _pausedAtBeat;
-    final backupProcessedEvents = Set<String>.from(_processedEvents);
-    
     print('[DEBUG] Storing playback state: playing=$wasPlaying paused=$wasPaused position=$currentPosition');
     
     // Store current track states and volumes
@@ -1419,7 +1288,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     // Restore playback state if we were playing
     if (wasPlaying && !wasPaused) {
       print('[DEBUG] Restoring active playback state...');
-      _processedEvents = backupProcessedEvents;
       
       setState(() {
         isPlaying = true;
@@ -1427,8 +1295,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         position = currentPosition;
       });
       
-      // Restart optimized playback timer
-      _playbackTimer = Timer.periodic(Duration(milliseconds: 1), (timer) {
+      // UI position updates at 60fps — audio timing is handled natively in C++ render callback
+      _playbackTimer = Timer.periodic(Duration(milliseconds: 16), (timer) {
         _processPlayback();
       });
       
@@ -1837,93 +1705,5 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       ),
     );
   }
-  
-  
-  // PERFORMANCE OPTIMIZATION: Pre-computed event scheduling system
-  void _ensureEventTimeline() {
-    // Rebuild timeline when necessary: explicit rebuild request OR parameter changes
-    if (!_timelineNeedsRebuild && 
-        _lastTimelineStepCount == stepCount && 
-        (_lastTimelineTempo - tempo).abs() < 0.01) {
-      return; // Timeline is up to date
-    }
-    
-    // Timeline rebuild: ${_eventTimeline.length} events generated
-    
-    // Performance: Rebuilding event timeline
-    _eventTimeline.clear();
-    
-    // Build sorted timeline of all events
-    for (final track in tracks) {
-      for (final event in track.events) {
-        if (event is MidiEvent) {
-          // Skip Program Change events during playback to prevent SF2 reload spam
-          if ((event.midiStatus & 0xF0) == 0xC0) {
-            continue;
-          }
-          
-          _eventTimeline.add(ScheduledEvent(
-            track: track,
-            event: event,
-            originalBeat: event.beat,
-          ));
-        }
-      }
-    }
-    
-    // Sort by beat for efficient binary search
-    _eventTimeline.sort((a, b) => a.originalBeat.compareTo(b.originalBeat));
-    
-    _timelineNeedsRebuild = false;
-    _lastTimelineStepCount = stepCount.toDouble();
-    _lastTimelineTempo = tempo;
-    
-    // Performance: Event timeline built
-  }
-  
-  List<ScheduledEvent> _getEventsInTimeWindow(double windowStart, double windowEnd, double currentBeat) {
-    final eventsToProcess = <ScheduledEvent>[];
-    
-    // Searching ${_eventTimeline.length} events for scheduling window
-    
-    for (final scheduledEvent in _eventTimeline) {
-      final eventBeat = scheduledEvent.originalBeat;
-      
-      // Calculate effective beat (handle looping robustly)
-      double? effectiveBeat;
-      if (isLooping) {
-        // Only consider current and next cycle candidates. Avoid previous-cycle candidate to prevent duplicates at step 0
-        for (final k in [0, 1]) {
-          final candidate = eventBeat + k * stepCount;
-          if (candidate >= windowStart && candidate <= windowEnd) {
-            effectiveBeat = candidate;
-            // Loop match: beat=${eventBeat.toStringAsFixed(3)} track=${scheduledEvent.track.id}
-            break;
-          }
-        }
-        if (effectiveBeat == null) {
-          continue; // Not in window for this cycle
-        }
-      } else {
-        if (eventBeat < windowStart || eventBeat > windowEnd) {
-          continue;
-        }
-        effectiveBeat = eventBeat;
-        // Linear match: beat=${eventBeat.toStringAsFixed(3)} track=${scheduledEvent.track.id}
-      }
-      
-      // Create processed event with effective beat
-      eventsToProcess.add(ScheduledEvent(
-        track: scheduledEvent.track,
-        event: scheduledEvent.event,
-        originalBeat: scheduledEvent.originalBeat,
-        effectiveBeat: effectiveBeat,
-      ));
-    }
-    
-    return eventsToProcess;
-  }
-  
-  // REMOVED: Event cleanup method (no longer needed without deduplication)
-  
+
 }

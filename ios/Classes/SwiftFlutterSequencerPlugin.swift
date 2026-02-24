@@ -198,20 +198,8 @@ func createAudioUnitTrack(_ audioUnitId: String, completion: @escaping (Int) -> 
 
 @_cdecl("setup_engine")
 func setupEngine(sampleRateCallbackPort: Dart_Port) {
-    NSLog("🚨🚨🚨 NUCLEAR FFI: setup_engine called with port: \(sampleRateCallbackPort)")
-    print("[DEBUG] ==> setup_engine called with port: \(sampleRateCallbackPort)")
-    
-    // Initialize the legacy engine for backward compatibility
+    // CocoaEngine init starts AVAudioEngine, creates C++ scheduler on mixer, and sends sample rate callback
     plugin.engine = CocoaEngine(sampleRateCallbackPort: sampleRateCallbackPort, registrar: plugin.registrar)
-    
-    // The new professional engine is already initialized in FlutterSequencerPlatform
-    print("[DEBUG] Legacy engine setup completed, professional engine already active")
-    
-    // TRY A SIMPLER APPROACH: Since the callback system may not be working, 
-    // just return success by not waiting for callback
-    NSLog("✅✅✅ NUCLEAR FFI: setup_engine completed, sending callback...")
-    callbackToDartInt32(sampleRateCallbackPort, 44100)
-    NSLog("🎯🎯🎯 NUCLEAR FFI: callback sent")
 }
 
 @_cdecl("destroy_engine")
@@ -246,18 +234,13 @@ func addTrackSfzString(sampleRoot: UnsafePointer<CChar>, sfzString: UnsafePointe
 @_cdecl("add_track_sf2")
 func addTrackSf2(path: UnsafePointer<CChar>, isAsset: Bool, presetIndex: Int32, callbackPort: Dart_Port) {
     let pathString = String(cString: path)
-    NSLog("🔥🔥🔥 NUCLEAR FFI: add_track_sf2 called: \(pathString) isAsset=\(isAsset) preset=\(presetIndex)")
-    
+
     guard let engine = plugin.engine else {
-        NSLog("❌❌❌ NUCLEAR FFI: Engine not available!")
-        print("[DEBUG] Engine not available, returning error track index")
         callbackToDartInt32(callbackPort, -1)
         return
     }
-    
-    NSLog("✅✅✅ NUCLEAR FFI: Calling engine.addTrackSf2")
+
     engine.addTrackSf2(sf2Path: pathString, isAsset: isAsset, presetIndex: presetIndex) { trackIndex in
-        NSLog("🎯🎯🎯 NUCLEAR FFI: addTrackSf2 completed with trackIndex=\(trackIndex)")
         callbackToDartInt32(callbackPort, Int32(trackIndex))
     }
 }
@@ -300,13 +283,7 @@ func resetTrack(trackIndex: track_index_t) {
 
 @_cdecl("get_position")
 func getPosition() -> position_frame_t {
-    guard let engine = plugin.engine else {
-        print("[DEBUG] Engine not available, returning 0")
-        return 0
-    }
-    
-    // CRITICAL FIX: Get position from CocoaEngine's position tracking
-    // Since scheduler is nil, we use the engine's own position
+    guard let engine = plugin.engine else { return 0 }
     return position_frame_t(engine.getPosition())
 }
 
@@ -339,78 +316,33 @@ func getBufferAvailableCount(trackIndex: track_index_t) -> UInt32 {
 
 @_cdecl("handle_events_now")
 func handleEventsNow(trackIndex: track_index_t, eventData: UnsafePointer<UInt8>, eventsCount: UInt32) {
-    // CRITICAL: This should appear in system logs if function is called
-    NSLog("🚨🚨🚨 FUNCTION ENTRY: handleEventsNow track=%d count=%d", trackIndex, eventsCount)
-    print("🚨🚨🚨 NATIVE FFI ENTRY: handleEventsNow track=\(trackIndex) count=\(eventsCount)")
-    
-    guard let engine = plugin.engine else {
-        NSLog("❌❌❌ ENGINE NOT AVAILABLE")
-        print("❌❌❌ NATIVE FFI: ENGINE NOT AVAILABLE")
+    guard let engine = plugin.engine else { return }
+    guard eventsCount > 0 && eventsCount <= 4096 else { return }
+
+    // Use scheduler for immediate event dispatch when available
+    if let scheduler = engine.scheduler {
+        let events = UnsafeMutablePointer<SchedulerEvent>.allocate(capacity: Int(eventsCount))
+        rawEventDataToEvents(eventData, eventsCount, events)
+        SchedulerHandleEventsNow(scheduler, trackIndex, UnsafePointer(events), eventsCount)
+        events.deallocate()
         return
     }
-    
-    NSLog("✅✅✅ Engine available, processing events...")
-    print("✅✅✅ NATIVE FFI: Engine available, processing events...")
-    
-    // CRITICAL TEST: Check if we reach this point
-    print("🧪 CRITICAL TEST: About to start event processing")
-    NSLog("🧪 CRITICAL TEST: About to start event processing")
-    
-    // FIXED: Direct MIDI processing with detailed diagnostics
-    NSLog("🎵 Processing %d events for track %d", eventsCount, trackIndex)
-    print("🎵 NATIVE FFI: Processing \(eventsCount) events for track \(trackIndex)")
-    
-    // SIMPLIFIED: Safe MIDI processing to identify the crash point
-    guard eventsCount > 0 else {
-        NSLog("⚠️ No events to process")
-        return
-    }
-    
-    NSLog("🎯 SAFE: Processing %d events", eventsCount)
-    
-    // Process each event with minimal unsafe operations
+
+    // Fallback: direct MIDI dispatch (for when scheduler is nil)
     for i in 0..<Int(eventsCount) {
-        let offset = i * 16 // 16 bytes per SchedulerEvent structure
-        
-        NSLog("📍 SAFE: Event %d at offset %d", i, offset)
-        
-        // Safe bounds check
-        let totalBytes = Int(eventsCount) * 16
-        guard offset + 16 <= totalBytes else {
-            NSLog("❌ SAFE: Bounds error for event %d", i)
-            continue
-        }
-        
-        // Extract raw bytes safely
+        let offset = i * 16
         let eventBytes = UnsafeBufferPointer(start: eventData.advanced(by: offset), count: 16)
-        
-        // Read event type from bytes 4-7 (UInt32)
+
         let eventTypeBytes = Array(eventBytes[4..<8])
         let eventType = eventTypeBytes.withUnsafeBytes { $0.load(as: UInt32.self) }
-        
-        NSLog("🔍 SAFE: Event %d type=%d", i, eventType)
-        
+
         if eventType == 0 { // MIDI_EVENT
-            // MIDI data starts at byte 8
             let midiStatus = eventBytes[8]
             let midiData1 = eventBytes[9]
             let midiData2 = eventBytes[10]
-            
-            NSLog("🎵 SAFE: MIDI track=%d status=0x%02X note=%d vel=%d", trackIndex, midiStatus, midiData1, midiData2)
-            
-            // CRITICAL FIX: Send MIDI events immediately without any dispatch
-            // This ensures minimum latency for real-time audio
             engine.sendMIDIEvent(trackIndex: trackIndex, midiStatus: midiStatus, midiData1: midiData1, midiData2: midiData2)
-            
-        } else if eventType == 1 { // VOLUME_EVENT
-            // Volume stored as float at bytes 8-11
-            let volumeBytes = Array(eventBytes[8..<12])
-            let volume = volumeBytes.withUnsafeBytes { $0.load(as: Float.self) }
-            NSLog("🔊 SAFE: Volume track=%d vol=%f", trackIndex, volume)
         }
     }
-    
-    NSLog("✅ SAFE: All events processed")
 }
 
 @_cdecl("schedule_events")
@@ -419,7 +351,8 @@ func scheduleEvents(trackIndex: track_index_t, eventData: UnsafePointer<UInt8>, 
         print("[DEBUG] Scheduler not available, returning 0")
         return 0
     }
-    
+    guard eventsCount > 0 && eventsCount <= 4096 else { return 0 }
+
     let events = UnsafeMutablePointer<SchedulerEvent>.allocate(capacity: Int(eventsCount))
     
     rawEventDataToEvents(eventData, eventsCount, events)

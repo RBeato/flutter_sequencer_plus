@@ -23,8 +23,8 @@ AndroidEngine::AndroidEngine(Dart_Port sampleRateCallbackPort) {
         if (posix_memalign(reinterpret_cast<void**>(&mAudioBuffers[i]), 
                           32, bufferSize * sizeof(int16_t)) != 0) {
             LOGE("Failed to allocate aligned audio buffer %d", i);
-            // Fallback to regular allocation
-            mAudioBuffers[i] = new int16_t[bufferSize];
+            // Fallback: use malloc to match free() in destructor
+            mAudioBuffers[i] = static_cast<int16_t*>(malloc(bufferSize * sizeof(int16_t)));
         }
         memset(mAudioBuffers[i], 0, bufferSize * sizeof(int16_t));
     }
@@ -33,8 +33,8 @@ AndroidEngine::AndroidEngine(Dart_Port sampleRateCallbackPort) {
     if (posix_memalign(reinterpret_cast<void**>(&mTempFloatBuffer), 
                       32, bufferSize * sizeof(float)) != 0) {
         LOGE("Failed to allocate aligned float buffer");
-        // Fallback to regular allocation
-        mTempFloatBuffer = new float[bufferSize];
+        // Fallback: use malloc to match free() in destructor
+        mTempFloatBuffer = static_cast<float*>(malloc(bufferSize * sizeof(float)));
     }
     memset(mTempFloatBuffer, 0, bufferSize * sizeof(float));
     

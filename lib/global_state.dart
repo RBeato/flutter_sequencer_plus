@@ -20,9 +20,9 @@ class GlobalState {
   }
 
   var keepEngineRunning = false;
-  // FIXED APPROACH: iOS needs Dart-based scheduling due to native bridge incompatibility
-  // iOS native bridge returns eventsSyncedCount=0, rejecting all events
-  bool iosNativeSchedulingEnabled = false;
+  // Native C++ scheduling enabled on iOS via mixer render callback
+  // The scheduler processes events from the audio thread for sample-accurate timing
+  bool iosNativeSchedulingEnabled = true;
   final sequenceIdMap = <int, Sequence>{};
   int? sampleRate;
   var isEngineReady = false;
