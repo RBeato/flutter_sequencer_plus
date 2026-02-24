@@ -1,7 +1,5 @@
 import 'dart:io';
 import 'dart:math';
-import 'dart:async';
-
 import 'package:path/path.dart' as p;
 
 import 'constants.dart';
@@ -164,56 +162,30 @@ class Track {
   static final Map<String, DateTime> _lastNoteTime = {};
   static const Duration _debounceMs = Duration(milliseconds: 50);
 
-  /// Calculate shorter duration for real-time tapped notes
-  /// Tapped notes should be punchy, not sustained
-  double _calculateTapNoteDuration(double tempo) {
-    // Doubled duration for more sustain on taps
-    // Base: 0.4 beats at 120 BPM, scale with tempo (was 0.2)
-    const double baseTempo = 120.0;
-    const double baseDuration = 0.4; // Double the previous duration
-    
-    double tapDuration = (baseTempo / tempo) * baseDuration;
-    
-    // Clamp to doubled range: 0.1 to 0.6 beats (was 0.05-0.3)
-    return tapDuration.clamp(0.1, 0.6);
-  }
-
   /// Handles a Note On event on this track immediately.
+  /// The note will sustain until stopNoteNow() is called for the same note.
   /// The event will not be added to this track's events.
   void startNoteNow({required int noteNumber, required double velocity}) {
     // Debounce rapid tapping to prevent audio overlapping/freezing
     final noteKey = '$id-$noteNumber';
     final now = DateTime.now();
     final lastTime = _lastNoteTime[noteKey];
-    
+
     if (lastTime != null && now.difference(lastTime) < _debounceMs) {
       // Skip this note - too rapid
       return;
     }
     _lastNoteTime[noteKey] = now;
-    
+
     final nextBeat = sequence.getBeat();
     final midiVelocity = _velocityToMidi(velocity);
-    // Send Note ON immediately
+    // Send Note ON immediately - note will sustain until stopNoteNow() is called
     final noteOnEvent = MidiEvent.ofNoteOn(
         beat: nextBeat,
         noteNumber: noteNumber,
         velocity: midiVelocity);
     NativeBridge.handleEventsNow(
         id, [noteOnEvent], Sequence.globalState.sampleRate!, sequence.tempo);
-    
-    // Schedule automatic Note OFF for short, punchy sustain
-    final tapDuration = _calculateTapNoteDuration(sequence.tempo);
-    final noteOffBeat = nextBeat + tapDuration;
-    
-    // Use a timer to send note off after the calculated duration
-    Timer(Duration(milliseconds: (tapDuration * 60000 / sequence.tempo).round()), () {
-      final noteOffEvent = MidiEvent.ofNoteOff(
-          beat: noteOffBeat,
-          noteNumber: noteNumber);
-      NativeBridge.handleEventsNow(
-          id, [noteOffEvent], Sequence.globalState.sampleRate!, sequence.tempo);
-    });
   }
 
   /// Handles a Note Off event on this track immediately.
