@@ -12,7 +12,7 @@ static OSStatus globalRenderCallback(
     UInt32 inNumberFrames,
     AudioBufferList* _Nullable ioData
 ) {
-    if (*ioActionFlags != kAudioUnitRenderAction_PreRender) return noErr;
+    if (!(*ioActionFlags & kAudioUnitRenderAction_PreRender)) return noErr;
 
     auto scheduler = (CocoaScheduler*)inRefCon;
     scheduler->handleAllTracks(inNumberFrames);
