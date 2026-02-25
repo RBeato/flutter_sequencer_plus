@@ -1,0 +1,5 @@
+// DISABLED: CoreAudio implementation incomplete
+// module iOSAudioCore_C {
+//     header "iOSAudioCore_C.h"
+//     export *
+// }

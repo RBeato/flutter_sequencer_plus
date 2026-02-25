@@ -14,7 +14,7 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/flutter_sequencer/ios"
 
 SPEC CHECKSUMS:
-  Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_sequencer: a394d9c90483556c9d6172487268d933b796f523
 
 PODFILE CHECKSUM: 95c1b004ae15496f24c36326084649a01d1adc8f
