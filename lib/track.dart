@@ -482,36 +482,17 @@ class Track {
         sampleRate,
         tempo,
         sequence.engineStartFrame + frameOffset);
-    
-    // REAL-TIME EDITING FIX: If buffer is full during playback, clear old events and retry
-    if (eventsSyncedCount == 0 && eventsToSync.isNotEmpty && sequence.isPlaying) {
-      // Android buffer full, clearing and retrying
-      
-      // Clear events that are more than 1 second in the past to make room for new events
-      final currentFrame = NativeBridge.getPosition();
-      final clearBeforeFrame = currentFrame - (sampleRate * 1); // 1 second ago
-      NativeBridge.clearEvents(id, clearBeforeFrame);
-      
-      // Retry scheduling the events
-      eventsSyncedCount = NativeBridge.scheduleEvents(
-          id,
-          eventsToSync,
-          sampleRate,
-          tempo,
-          sequence.engineStartFrame + frameOffset);
-      // Buffer cleared, retrying events
-    }
+
+    // If buffer is full, stop scheduling. The periodic top-off timer
+    // (every TOP_OFF_PERIOD_MS) will fill remaining space as the audio
+    // thread consumes events. Clearing-and-retrying here is destructive:
+    // clearAfter(currentFrame - sampleRate) wipes ALL near-future events,
+    // leaving only far-future ones the audio thread can't reach yet.
 
     if (eventsSyncedCount > 0) {
       final lastEvent = eventsToSync[eventsSyncedCount - 1];
       final lastEventFrame = sequence.beatToFrames(lastEvent.beat);
       lastFrameSynced = sequence.engineStartFrame + lastEventFrame + frameOffset;
-      if (DEBUG_SEQUENCER_LOGS) {
-        final firstEvent = eventsToSync.first;
-        final firstFrame = sequence.beatToFrames(firstEvent.beat) + sequence.engineStartFrame + frameOffset;
-        final lastAbs = lastEventFrame + sequence.engineStartFrame + frameOffset;
-        // Events synced successfully
-      }
     }
 
     return eventsSyncedCount;

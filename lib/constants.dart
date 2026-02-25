@@ -1,9 +1,12 @@
 /// Seconds per microsecond
 const SECONDS_PER_US = 1 / 1000000;
 
-/// The size of the event buffer in the native backend
-/// Increased for fewer under-runs during fast passages and dense grids
-const BUFFER_SIZE = 4096;
+/// The size of the event buffer in the native backend.
+/// MUST match C++ Buffer.h template default (1024). A mismatch causes
+/// _scheduleEventsOptimized to over-iterate, triggering the clear-retry
+/// path that wipes near-future events and replaces them with far-future
+/// ones the audio thread can't reach yet — resulting in silence.
+const BUFFER_SIZE = 1024;
 
 /// Interval to "top off" each track's buffer, in milliseconds
 /// Faster refill cadence improves stability at loop wraps and pattern changes
