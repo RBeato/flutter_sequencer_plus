@@ -79,7 +79,7 @@ public:
 private:
     std::atomic<buffer_index_t> mReadPosition { 0 };
     std::atomic<buffer_index_t> mWritePosition { 0 };
-    SchedulerEvent mEvents[BUFFER_SIZE];
+    SchedulerEvent mEvents[BUFFER_SIZE] = {};  // Zero-initialize to prevent garbage on first use
 
     bool isEmpty() {
         return mReadPosition == mWritePosition;

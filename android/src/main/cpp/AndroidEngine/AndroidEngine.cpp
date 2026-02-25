@@ -99,7 +99,8 @@ void AndroidEngine::play() {
     
     if (!mIsPlaying.load()) {
         mIsPlaying.store(true);
-        
+        mFadeInRemaining.store(kFadeInFrames);  // Trigger fade-in ramp
+
         if (mPlayerPlay != nullptr) {
             LOGI("Starting OpenSL ES player");
             // Start OpenSL ES player
@@ -349,25 +350,27 @@ void AndroidEngine::playerCallback(SLAndroidSimpleBufferQueueItf bq, void* conte
         }
     }
     
-    // DEBUGGING: Test tone disabled - audio pipeline confirmed working
-    // The "bip" sound confirms OpenSL ES works, now focusing on MIDI->Audio generation
-    
+    // Apply fade-in ramp on first buffer(s) after play to prevent startup pop/glitch
+    int fadeRemaining = engine->mFadeInRemaining.load(std::memory_order_relaxed);
+    if (fadeRemaining > 0) {
+        const int totalSamples = kBufferSizeFrames * kChannelCount;
+        const int fadeStartFrame = kFadeInFrames - fadeRemaining;
+        for (int frame = 0; frame < kBufferSizeFrames; ++frame) {
+            int globalFrame = fadeStartFrame + frame;
+            if (globalFrame < kFadeInFrames) {
+                float gain = static_cast<float>(globalFrame) / static_cast<float>(kFadeInFrames);
+                for (int ch = 0; ch < kChannelCount; ++ch) {
+                    floatBuffer[frame * kChannelCount + ch] *= gain;
+                }
+            }
+        }
+        int consumed = std::min(fadeRemaining, static_cast<int>(kBufferSizeFrames));
+        engine->mFadeInRemaining.store(fadeRemaining - consumed, std::memory_order_relaxed);
+    }
+
     // Convert float to int16 using optimized function
     const int totalSamples = kBufferSizeFrames * kChannelCount;
     engine->convertFloatToInt16(floatBuffer, int16Buffer, totalSamples);
-    
-    // DEBUG: Check what we're sending to OpenSL ES
-    static int bufferDebugCounter = 0;
-    if (++bufferDebugCounter % 500 == 0) { // Reduced frequency
-        float maxInt16Sample = 0.0f;
-        const int totalSamples = kBufferSizeFrames * kChannelCount;
-        for (int i = 0; i < totalSamples; ++i) {
-            maxInt16Sample = std::max(maxInt16Sample, std::abs((float)int16Buffer[i]));
-        }
-        if (maxInt16Sample > 100.0f) { // Only log if there's actual audio
-            LOGI("AndroidEngine: OpenSL ES output level: %.1f/32767", maxInt16Sample);
-        }
-    }
     
     // Enqueue buffer
     SLresult result = (*bq)->Enqueue(bq, int16Buffer, 

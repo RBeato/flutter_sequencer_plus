@@ -139,6 +139,10 @@ public class CocoaEngine {
 
                                 self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
 
+                                // Prime the sampler: send a silent note to force sample cache warmup.
+                                // This prevents the scratch/glitch on the very first real note.
+                                self.primeInstrument(avAudioUnit: avAudioUnit)
+
                                 let totalTime = CFAbsoluteTimeGetCurrent() - startTime
                                 print("[PERF] ✅ Track \(trackIndex) ready in \(Int(totalTime * 1000))ms")
 
@@ -370,6 +374,16 @@ public class CocoaEngine {
         }
     }
     
+    /// Send a silent note-on/off to force the AUSampler to cache its sample data.
+    /// Without this, the first real note can cause a glitch/scratch as the sampler
+    /// fetches samples from memory for the first time.
+    private func primeInstrument(avAudioUnit: AVAudioUnit) {
+        let au = avAudioUnit.audioUnit
+        // Note-on at velocity 1 (barely audible) on middle C, then immediate note-off
+        MusicDeviceMIDIEvent(au, 0x90, 60, 1, 0)
+        MusicDeviceMIDIEvent(au, 0x80, 60, 0, 0)
+    }
+
     // HIGH-PERFORMANCE connection optimized for immediate playback
     private func performanceConnect(avAudioUnit: AVAudioUnit, trackIndex: track_index_t) {
         do {
@@ -494,12 +508,14 @@ public class CocoaEngine {
                     
                     if loadResult {
                         let trackIndex = self.nextTrackIndex()
-                        
+
                         // CRITICAL: Connect immediately and register AudioUnit
                         self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
-                        
+
                         self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
-                        
+
+                        self.primeInstrument(avAudioUnit: avAudioUnit)
+
                         completion(trackIndex)
                     } else {
                         completion(track_index_t(999))
@@ -510,12 +526,12 @@ public class CocoaEngine {
             }
         }
     }
-    
+
     func addTrackSfzString(sampleRoot: UnsafePointer<CChar>, sfzString: UnsafePointer<CChar>, tuningString: UnsafePointer<CChar>, completion: @escaping (track_index_t) -> Void) {
-        
+
         // Create SfizzAU AudioUnit
         let sfizzAUDescription = SfizzAU.componentDescription
-        
+
         AudioUnitUtils.instantiate(
             description: sfizzAUDescription,
             sampleRate: Double(outputFormat.sampleRate),
@@ -525,27 +541,29 @@ public class CocoaEngine {
                 completion(track_index_t(999))
                 return
             }
-            
+
             guard let avAudioUnit = avAudioUnit else {
                 completion(track_index_t(999))
                 return
             }
-            
+
             // PERFORMANCE: Execute on main thread for immediate connection
             DispatchQueue.main.async {
                 // Cast to SfizzAU and load SFZ string
                 if let sfizzAU = avAudioUnit.auAudioUnit as? SfizzAU {
                     // Load the SFZ string
                     let loadResult = sfizzAU.loadSfzString(sampleRoot: sampleRoot, sfzString: sfzString, tuningString: tuningString)
-                    
+
                     if loadResult {
                         let trackIndex = self.nextTrackIndex()
-                        
+
                         // CRITICAL: Connect immediately and register AudioUnit
                         self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
-                        
+
                         self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
-                        
+
+                        self.primeInstrument(avAudioUnit: avAudioUnit)
+
                         completion(trackIndex)
                     } else {
                         completion(track_index_t(999))
@@ -607,12 +625,14 @@ public class CocoaEngine {
                     // PERFORMANCE: Execute on main thread for immediate connection
                     DispatchQueue.main.async {
                         let trackIndex = self.nextTrackIndex()
-                        
+
                         // CRITICAL: Connect immediately and register AudioUnit
                         self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
-                        
+
                         self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
-                        
+
+                        self.primeInstrument(avAudioUnit: avAudioUnit)
+
                         completion(trackIndex)
                     }
                 }
@@ -644,6 +664,7 @@ public class CocoaEngine {
                             let trackIndex = self.nextTrackIndex()
                             self.performanceConnect(avAudioUnit: avAudioUnit, trackIndex: trackIndex)
                             self.setTrackAudioUnit(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
+                            self.primeInstrument(avAudioUnit: avAudioUnit)
                             completion(trackIndex)
                         }
                     }

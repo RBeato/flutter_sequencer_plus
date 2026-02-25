@@ -59,6 +59,9 @@ public:
                 continue;
             }
 
+            // Zero mixingBuffer before each track to prevent stale/garbage data
+            memset(mixingBuffer, 0, sizeof(float) * totalSamples);
+
             handleFrames(trackIndex, numFrames);
 
             // Optimized mixing loop with level scaling
@@ -190,7 +193,7 @@ private:
         }
     }
 
-    float mixingBuffer[kBufferSize];
+    float mixingBuffer[kBufferSize] = {};  // Zero-initialize to prevent startup glitch
     std::unordered_map<track_index_t, TrackInfo> mTrackMap = {};
     int32_t mChannelCount = 1; // Default to mono
 };

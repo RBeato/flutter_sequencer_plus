@@ -48,6 +48,10 @@ private:
     // Performance monitoring
     std::atomic<uint64_t> mDroppedFrames{0};
     std::atomic<uint64_t> mTotalFrames{0};
+
+    // Startup fade-in to prevent glitch/pop on first buffers
+    static constexpr int kFadeInFrames = 128;  // ~3ms at 44.1kHz
+    std::atomic<int> mFadeInRemaining{0};
     
     void audioThreadFunc();
     bool initOpenSLES();
