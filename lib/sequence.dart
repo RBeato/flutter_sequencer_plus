@@ -50,6 +50,11 @@ class Sequence {
   double loopStartBeat = 0;
   double loopEndBeat = 0;
 
+  // PERFORMANCE: Cached frame calculations to avoid redundant beatToFrames() calls
+  int? _cachedLoopStartFrame;
+  int? _cachedLoopEndFrame;
+  int? _cachedEndFrame;
+
   /// Gets all tracks.
   List<Track> getTracks() {
     return _tracks.values.toList();
@@ -155,6 +160,7 @@ class Sequence {
     engineStartFrame += framesToAdvance;
 
     tempo = nextTempo;
+    _invalidateFrameCache(); // PERFORMANCE: Invalidate cache when tempo changes
 
     // OPTIMIZED: Batch sync buffer operations to reduce overhead
     if (!(Platform.isIOS && !GlobalState().iosNativeSchedulingEnabled)) {
@@ -196,6 +202,7 @@ class Sequence {
 
     this.loopStartBeat = loopStartBeat;
     this.loopEndBeat = loopEndBeat;
+    _invalidateFrameCache(); // PERFORMANCE: Invalidate cache when loop bounds change
 
     // OPTIMIZED: Platform-specific buffer sync strategy
     // Android needs more frequent syncing to prevent note accumulation
@@ -223,6 +230,7 @@ class Sequence {
     loopStartBeat = 0;
     loopEndBeat = 0;
     loopState = LoopState.Off;
+    _invalidateFrameCache(); // PERFORMANCE: Invalidate cache when loop is disabled
 
     // OPTIMIZED: Only sync buffers if we were actually looping
     if (wasLooping && !(Platform.isIOS && !GlobalState().iosNativeSchedulingEnabled)) {
@@ -234,6 +242,7 @@ class Sequence {
   /// won't be scheduled.
   void setEndBeat(double beat) {
     endBeat = beat;
+    _invalidateFrameCache(); // PERFORMANCE: Invalidate cache when endBeat changes
   }
 
   /// Immediately changes the position of the sequence to the given beat.
@@ -289,10 +298,8 @@ class Sequence {
   /// {@macro flutter_sequencer_library_private}
   /// Returns the length of the loop in frames.
   int getLoopLengthFrames() {
-    final loopStartFrame = beatToFrames(loopStartBeat);
-    final loopEndFrame = beatToFrames(loopEndBeat);
-
-    return loopEndFrame - loopStartFrame;
+    // PERFORMANCE: Use cached values instead of recalculating
+    return _getLoopEndFrame() - _getLoopStartFrame();
   }
 
   /// {@macro flutter_sequencer_library_private}
@@ -300,10 +307,11 @@ class Sequence {
   /// since the sequence started playing.
   /// OPTIMIZED: Cache expensive calculations.
   int getLoopsElapsed(int frame) {
-    final loopStartFrame = beatToFrames(loopStartBeat);
+    // PERFORMANCE: Use cached value
+    final loopStartFrame = _getLoopStartFrame();
 
     if (frame <= loopStartFrame) return 0;
-    
+
     final loopLength = getLoopLengthFrames();
     if (loopLength == 0) return 0;
 
@@ -316,10 +324,11 @@ class Sequence {
   /// where it would be inside the loop range.
   /// OPTIMIZED: Reduce redundant calculations and improve performance.
   int getLoopedFrame(int frame) {
-    final loopStartFrame = beatToFrames(loopStartBeat);
-    
+    // PERFORMANCE: Use cached value
+    final loopStartFrame = _getLoopStartFrame();
+
     if (frame <= loopStartFrame) return frame;
-    
+
     final loopLengthFrames = getLoopLengthFrames();
     if (loopLengthFrames == 0) return frame;
 
@@ -333,6 +342,26 @@ class Sequence {
   int beatToFrames(double beat) {
     final us = ((1 / tempo) * beat * (60000000)).round();
     return Sequence.globalState.usToFrames(us);
+  }
+
+  // PERFORMANCE: Cache invalidation - call when tempo/loop/end values change
+  void _invalidateFrameCache() {
+    _cachedLoopStartFrame = null;
+    _cachedLoopEndFrame = null;
+    _cachedEndFrame = null;
+  }
+
+  // PERFORMANCE: Cached accessors to avoid redundant beatToFrames() calls
+  int _getLoopStartFrame() {
+    return _cachedLoopStartFrame ??= beatToFrames(loopStartBeat);
+  }
+
+  int _getLoopEndFrame() {
+    return _cachedLoopEndFrame ??= beatToFrames(loopEndBeat);
+  }
+
+  int _getEndFrame() {
+    return _cachedEndFrame ??= beatToFrames(endBeat);
   }
 
   /// {@macro flutter_sequencer_library_private}
@@ -373,9 +402,11 @@ class Sequence {
       final loopedFrame =
           loopState == LoopState.Off ? frame : getLoopedFrame(frame);
 
-      return max(min(loopedFrame, beatToFrames(endBeat)), 0);
+      // PERFORMANCE: Use cached endFrame
+      return max(min(loopedFrame, _getEndFrame()), 0);
     } else {
-      return max(min(beatToFrames(pauseBeat), beatToFrames(endBeat)), 0);
+      // PERFORMANCE: Use cached endFrame (pauseBeat isn't cached as it changes frequently)
+      return max(min(beatToFrames(pauseBeat), _getEndFrame()), 0);
     }
   }
 

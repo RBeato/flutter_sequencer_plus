@@ -378,17 +378,19 @@ class NativeBridge {
     final bytesPerEvent = SCHEDULER_EVENT_SIZE; // Use correct size from events.dart (16 bytes)
     final rawData = malloc.allocate<Uint8>(eventCount * bytesPerEvent);
 
+    // PERFORMANCE: Use bulk copy instead of per-byte iteration
+    final destList = rawData.asTypedList(eventCount * bytesPerEvent);
+
     for (int i = 0; i < eventCount; i++) {
       final event = events[i];
       final offset = i * bytesPerEvent;
 
-      // Use the correct serializeBytes method from SchedulerEvent
+      // Serialize event to ByteData
       final serializedBytes = event.serializeBytes(sampleRate, tempo, correctionFrames);
-      
-      // Copy the properly serialized bytes to our raw data buffer
-      for (int j = 0; j < bytesPerEvent; j++) {
-        (rawData + offset + j).value = serializedBytes.getUint8(j);
-      }
+
+      // PERFORMANCE: Bulk copy using setRange (much faster than per-byte loop)
+      final srcList = serializedBytes.buffer.asUint8List(serializedBytes.offsetInBytes, bytesPerEvent);
+      destList.setRange(offset, offset + bytesPerEvent, srcList);
     }
 
     return _SerializedEventData(rawData: rawData, eventCount: eventCount);

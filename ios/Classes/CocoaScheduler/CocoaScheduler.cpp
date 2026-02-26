@@ -38,21 +38,11 @@ void CocoaScheduler::startGlobalCallback() {
 }
 
 void CocoaScheduler::handleAllTracks(uint32_t numFrames) {
-    // PERFORMANCE: Use pre-allocated array instead of std::vector to eliminate allocation
-    size_t trackCount = 0;
-    {
-        std::lock_guard<std::mutex> lock(mBufferMutex);
-        // Copy track indices into pre-allocated cache (minimal lock time)
-        for (auto& pair : mBufferMap) {
-            if (pair.second != nullptr && trackCount < MAX_TRACKS) {
-                mTrackCache[trackCount++] = pair.first;
-            }
-        }
-    }
-    // Store count atomically for potential diagnostic use
-    mTrackCacheCount.store(trackCount, std::memory_order_relaxed);
+    // PERFORMANCE: Lock-free audio callback - read track count atomically
+    // Main thread updates mTrackCacheCount after rebuilding mTrackCache
+    size_t trackCount = mTrackCacheCount.load(std::memory_order_acquire);
 
-    // Process all tracks outside the lock
+    // Process all tracks without any locks (audio thread is read-only)
     for (size_t i = 0; i < trackCount; i++) {
         track_index_t trackIndex = mTrackCache[i];
         auto it = mSampleRateMap.find(trackIndex);
@@ -75,12 +65,33 @@ void CocoaScheduler::setTrackAudioUnit(track_index_t trackIndex, AudioUnit _Nonn
             mBufferMap[trackIndex] = std::make_shared<Buffer<>>();
         }
     }
+
+    // PERFORMANCE: Rebuild track cache snapshot for lock-free audio callback access
+    rebuildTrackCache();
+}
+
+void CocoaScheduler::rebuildTrackCache() {
+    // Called from main thread when tracks are added/removed
+    std::lock_guard<std::mutex> lock(mBufferMutex);
+
+    size_t count = 0;
+    for (auto& pair : mBufferMap) {
+        if (pair.second != nullptr && count < MAX_TRACKS) {
+            mTrackCache[count++] = pair.first;
+        }
+    }
+
+    // Atomic store with release semantics ensures audio thread sees updated cache
+    mTrackCacheCount.store(count, std::memory_order_release);
 }
 
 void CocoaScheduler::onRemoveTrack(track_index_t trackIndex) {
     mAudioUnitMap.erase(trackIndex);
     mSampleRateMap.erase(trackIndex);
     mTrackVolumeMap.erase(trackIndex);
+
+    // PERFORMANCE: Rebuild track cache snapshot after removing track
+    rebuildTrackCache();
 }
 
 void CocoaScheduler::onResetTrack(track_index_t trackIndex) {

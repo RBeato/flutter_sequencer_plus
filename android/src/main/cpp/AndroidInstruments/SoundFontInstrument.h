@@ -133,15 +133,11 @@ public:
         }
         #endif
 
-        // Apply soft limiting to prevent clipping distortion
+        // PERFORMANCE: Branchless soft limiting using std::clamp (C++17)
+        // Prevents branch mispredictions in tight loop
         constexpr float maxLevel = 0.95f;  // Leave headroom
         for (int32_t i = 0; i < totalSamples; ++i) {
-            float sample = audioData[i];
-            if (sample > maxLevel) {
-                audioData[i] = maxLevel;
-            } else if (sample < -maxLevel) {
-                audioData[i] = -maxLevel;
-            }
+            audioData[i] = std::clamp(audioData[i], -maxLevel, maxLevel);
         }
     }
 

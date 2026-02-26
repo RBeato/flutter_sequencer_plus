@@ -187,33 +187,12 @@ void BaseScheduler::handleFrames(track_index_t trackIndex, uint32_t numFramesToR
     
     handleRenderAudioRange(trackIndex, framesRendered, numFramesToRender - framesRendered);
 
-
-    // Thread-safe access to mHasRenderedMap
-    {
-        std::lock_guard<std::mutex> lock(mBufferMutex);
-
-        mHasRenderedMap[trackIndex] = true;
-        bool allTracksHaveRendered = true;
-
-        for (auto pair : mHasRenderedMap) {
-            if (pair.second == false) {
-                allTracksHaveRendered = false;
-                break;
-            }
-        }
-
-        if (allTracksHaveRendered) {
-            // Don't update the position if setPosition was called during this function
-            if (mPositionFrames == originalPositionFrames) {
-                mPositionFrames = startFrame + numFramesToRender;
-                // printf("Track %i: Updated position to %i\n", trackIndex, mPositionFrames);
-            // } else {
-                // printf("Track %i: Not updating position since it changed during render\n", trackIndex);
-            }
-
-            for (auto pair : mHasRenderedMap) {
-                mHasRenderedMap[pair.first] = false;
-            }
-        }
+    // PERFORMANCE: Simplified position tracking without heavy mutex contention
+    // Just update position atomically after rendering (good enough for most use cases)
+    // Don't update if setPosition was called during rendering
+    if (mPositionFrames.compare_exchange_weak(originalPositionFrames, startFrame + numFramesToRender,
+                                               std::memory_order_release,
+                                               std::memory_order_relaxed)) {
+        // Position updated successfully
     }
 }

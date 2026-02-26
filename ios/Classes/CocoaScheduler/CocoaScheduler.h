@@ -20,6 +20,7 @@ public:
     void startGlobalCallback();
     void handleAllTracks(uint32_t numFrames);
     void onRemoveTrack(track_index_t trackIndex);
+    void rebuildTrackCache();
 
     void onResetTrack(track_index_t trackIndex);
     void handleRenderAudioRange(track_index_t trackIndex, uint32_t offsetFrame, uint32_t numFramesToRender);
