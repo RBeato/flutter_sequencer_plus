@@ -263,23 +263,19 @@ public class CocoaEngine {
     }
 
     /// Warm up the audio pipeline before starting playback on physical devices.
-    /// This eliminates the first-buffer glitch by forcing cache loads and thread stabilization.
+    /// Non-blocking approach - no sleep to avoid UI freeze.
     private func warmUpAudioPipeline() {
-        // Get all audio units thread-safely
-        let audioUnits = audioUnitsQueue.sync { Array(self.unsafeAvAudioUnits.values) }
-
-        // Send warm-up notes to each track to prime the DSP pipeline
-        for audioUnit in audioUnits {
-            let au = audioUnit.audioUnit
-            // Quick note burst to force cache warming
-            MusicDeviceMIDIEvent(au, 0x90, 60, 80, 0)
-            MusicDeviceMIDIEvent(au, 0x80, 60, 0, 0)
+        // Audio thread RT priority is already set in render callback
+        // Instruments already primed during track creation
+        // No additional warm-up needed - just ensure engine is running
+        if !engine.isRunning {
+            do {
+                engine.prepare()
+                try engine.start()
+            } catch {
+                print("[WARNING] Warm-up engine start failed: \(error)")
+            }
         }
-
-        // CRITICAL: Brief delay to let audio thread stabilize
-        // Physical devices need this to establish RT priority and warm L1/L2 caches
-        // This 100ms delay is imperceptible to users but eliminates first-buffer glitches
-        usleep(100000) // 100ms = 4-5 audio buffers at 44.1kHz with 512-sample buffer
     }
     
     func pause() {
@@ -416,32 +412,20 @@ public class CocoaEngine {
         }
     }
     
-    /// Send multiple warm-up notes to force the AUSampler to fully cache sample data.
-    /// Physical devices need more aggressive priming than simulators to prevent
-    /// first-note glitches. We prime across multiple notes with realistic velocities.
+    /// Send silent warm-up notes to force the AUSampler to cache sample data.
+    /// Uses velocity 1 (inaudible) to prime cache without audible artifacts.
     private func primeInstrument(avAudioUnit: AVAudioUnit) {
         let au = avAudioUnit.audioUnit
 
-        // AGGRESSIVE PRIMING: Prime multiple notes at different velocities
-        // This forces full sample cache warmup and stabilizes the DSP pipeline
-        let primingNotes: [(UInt32, UInt32)] = [
-            (60, 64),  // Middle C at medium velocity
-            (64, 80),  // E at higher velocity
-            (67, 96),  // G at near-max velocity
-            (48, 100), // Lower octave at max velocity
-            (72, 110)  // Higher octave at high velocity
-        ]
+        // SILENT PRIMING: Use velocity 1 (inaudible but forces sample load)
+        // Prime across octaves to ensure full sample range is cached
+        let primingNotes: [UInt32] = [36, 48, 60, 72, 84, 96] // C1 to C7
 
-        for (note, velocity) in primingNotes {
-            // Note-on with realistic velocity
-            MusicDeviceMIDIEvent(au, 0x90, note, velocity, 0)
-            // Immediate note-off to prevent audible sound
+        for note in primingNotes {
+            // Velocity 1 = silent but triggers sample loading
+            MusicDeviceMIDIEvent(au, 0x90, note, 1, 0)
             MusicDeviceMIDIEvent(au, 0x80, note, 0, 0)
         }
-
-        // Give the sampler a moment to process these events and warm caches
-        // This is non-blocking and happens during track initialization
-        usleep(5000) // 5ms sleep to let cache warm up
     }
 
     // HIGH-PERFORMANCE connection optimized for immediate playback
