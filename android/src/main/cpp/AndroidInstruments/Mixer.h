@@ -66,6 +66,12 @@ public:
             // Zero mixingBuffer before each track to prevent stale/garbage data
             memset(mixingBuffer, 0, sizeof(float) * totalSamples);
 
+            // PERFORMANCE: Prefetch audio data into L1 cache for next iteration
+            #ifdef __ARM_NEON__
+            __builtin_prefetch(&mixingBuffer[0], 1, 3);  // Write prefetch, high temporal locality
+            __builtin_prefetch(&audioData[0], 0, 3);  // Read prefetch for accumulation
+            #endif
+
             handleFrames(trackIndex, numFrames);
 
             // PERFORMANCE: SIMD-optimized mixing loop with NEON intrinsics

@@ -1,6 +1,9 @@
 #include "CocoaScheduler.h"
 #include <memory>
 #include <vector>
+#include <mach/mach.h>
+#include <mach/thread_policy.h>
+#include <pthread.h>
 
 // Global render callback — installed ONCE on the mixer AudioUnit.
 // Fires every audio buffer cycle and processes events for ALL tracks.
@@ -13,6 +16,30 @@ static OSStatus globalRenderCallback(
     AudioBufferList* _Nullable ioData
 ) {
     if (!(*ioActionFlags & kAudioUnitRenderAction_PreRender)) return noErr;
+
+    // PERFORMANCE: Set real-time thread priority (once)
+    static bool rtPrioritySet = false;
+    if (!rtPrioritySet) {
+        // Set time-constraint policy for real-time audio thread
+        thread_time_constraint_policy_data_t policy;
+        policy.period = 2902; // ~5ms at bus freq (match audio buffer period)
+        policy.computation = 1451; // Allow ~2.5ms of computation
+        policy.constraint = 2902; // Must finish within period
+        policy.preemptible = TRUE;
+
+        mach_port_t thread = pthread_mach_thread_np(pthread_self());
+        kern_return_t result = thread_policy_set(
+            thread,
+            THREAD_TIME_CONSTRAINT_POLICY,
+            (thread_policy_t)&policy,
+            THREAD_TIME_CONSTRAINT_POLICY_COUNT
+        );
+
+        if (result == KERN_SUCCESS) {
+            printf("iOS audio thread promoted to real-time priority\n");
+        }
+        rtPrioritySet = true;
+    }
 
     auto scheduler = (CocoaScheduler*)inRefCon;
     scheduler->handleAllTracks(inNumberFrames);

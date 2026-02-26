@@ -98,6 +98,15 @@ target_compile_options(flutter_sequencer PRIVATE
     -fno-signed-zeros
     -fno-trapping-math
     -funroll-loops
+    -fomit-frame-pointer  # Better register allocation
+    -finline-functions  # Aggressive inlining
+    -fvectorize  # Explicit vectorization enable
+    -fslp-vectorize  # Superword-level parallelism vectorization
     # Note: Removed -frename-registers (not supported by clang)
     # Note: Kept exceptions enabled for compatibility
+)
+
+# PERFORMANCE: Link-time optimization for maximum performance
+set_target_properties(flutter_sequencer PROPERTIES
+    INTERPROCEDURAL_OPTIMIZATION TRUE  # Enable LTO
 )

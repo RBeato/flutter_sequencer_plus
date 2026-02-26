@@ -133,12 +133,32 @@ public:
         }
         #endif
 
-        // PERFORMANCE: Branchless soft limiting using std::clamp (C++17)
-        // Prevents branch mispredictions in tight loop
+        // PERFORMANCE: SIMD-accelerated soft limiting with NEON
         constexpr float maxLevel = 0.95f;  // Leave headroom
+
+        #ifdef __ARM_NEON__
+        // NEON SIMD path: Clamp 4 samples at once
+        const int32_t simdSamples = totalSamples & ~3;
+        float32x4_t minVec = vdupq_n_f32(-maxLevel);
+        float32x4_t maxVec = vdupq_n_f32(maxLevel);
+
+        for (int32_t i = 0; i < simdSamples; i += 4) {
+            float32x4_t samples = vld1q_f32(&audioData[i]);
+            samples = vmaxq_f32(samples, minVec);  // Clamp min
+            samples = vminq_f32(samples, maxVec);  // Clamp max
+            vst1q_f32(&audioData[i], samples);
+        }
+
+        // Handle remaining samples
+        for (int32_t i = simdSamples; i < totalSamples; ++i) {
+            audioData[i] = std::clamp(audioData[i], -maxLevel, maxLevel);
+        }
+        #else
+        // Scalar fallback: Branchless clamp
         for (int32_t i = 0; i < totalSamples; ++i) {
             audioData[i] = std::clamp(audioData[i], -maxLevel, maxLevel);
         }
+        #endif
     }
 
     void handleMidiEvent(uint8_t status, uint8_t data1, uint8_t data2) override {
