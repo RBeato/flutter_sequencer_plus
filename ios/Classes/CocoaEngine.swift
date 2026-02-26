@@ -412,20 +412,10 @@ public class CocoaEngine {
         }
     }
     
-    /// Send silent warm-up notes to force the AUSampler to cache sample data.
-    /// Uses velocity 1 (inaudible) to prime cache without audible artifacts.
+    /// Disable instrument priming - causing no sound issue
     private func primeInstrument(avAudioUnit: AVAudioUnit) {
-        let au = avAudioUnit.audioUnit
-
-        // SILENT PRIMING: Use velocity 1 (inaudible but forces sample load)
-        // Prime across octaves to ensure full sample range is cached
-        let primingNotes: [UInt32] = [36, 48, 60, 72, 84, 96] // C1 to C7
-
-        for note in primingNotes {
-            // Velocity 1 = silent but triggers sample loading
-            MusicDeviceMIDIEvent(au, 0x90, note, 1, 0)
-            MusicDeviceMIDIEvent(au, 0x80, note, 0, 0)
-        }
+        // DISABLED: Priming was preventing sound output
+        // AudioUnits initialize correctly without explicit priming
     }
 
     // HIGH-PERFORMANCE connection optimized for immediate playback
