@@ -32,18 +32,35 @@ public class CocoaEngine {
     init(sampleRateCallbackPort: Dart_Port, registrar: FlutterPluginRegistrar) {
         self.registrar = registrar
         
-        // PERFORMANCE OPTIMIZED: Configure audio session and engine for immediate playback
+        // PERFORMANCE OPTIMIZED: Configure audio session for stable playback
         do {
             let session = AVAudioSession.sharedInstance()
+
+            // CRITICAL FIX: Use appropriate buffer size for physical devices
+            // 5ms was too aggressive and caused error -50 on real hardware
+            // 10-12ms provides low latency while preventing buffer underruns
+            let preferredBufferSize = 0.012 // 12ms ≈ 512 samples at 44.1kHz
+
             try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            
-            // LOW-LATENCY: Set smallest possible buffer size for tighter timing
-            try session.setPreferredIOBufferDuration(0.005) // 5ms buffer (220 samples at 44.1kHz)
-            try session.setPreferredSampleRate(44100) // Lock to 44.1kHz
-            
+
+            // Set buffer size with fallback handling
+            do {
+                try session.setPreferredIOBufferDuration(preferredBufferSize)
+                print("[AUDIO] Buffer size set to \(preferredBufferSize * 1000)ms")
+            } catch {
+                print("[WARNING] Could not set preferred buffer size: \(error)")
+                // Continue with system default buffer size
+            }
+
+            // Don't force sample rate - use hardware's native rate to avoid resampling overhead
+            // Most modern iOS devices use 48kHz, forcing 44.1kHz causes unnecessary CPU load
+            print("[AUDIO] Using hardware sample rate: \(session.sampleRate)Hz")
+
             try session.setActive(true)
+            print("[AUDIO] Audio session activated successfully")
         } catch {
             print("[ERROR] Audio session setup failed: \(error)")
+            // CRITICAL: This is a fatal error, audio won't work properly
         }
         
         // Use optimized output format
