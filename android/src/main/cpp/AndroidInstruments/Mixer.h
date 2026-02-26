@@ -13,6 +13,10 @@
 #include "../Utils/OptionArray.h"
 #include "../Utils/Logging.h"
 
+#ifdef __ARM_NEON__
+#include <arm_neon.h>  // SIMD intrinsics for ARM NEON
+#endif
+
 constexpr int32_t kBufferSize = 128*2;  // Match AndroidEngine buffer size (128 frames * 2 channels)
 constexpr uint8_t kMaxTracks = 64;  // Reasonable limit for mobile performance
 
@@ -64,19 +68,49 @@ public:
 
             handleFrames(trackIndex, numFrames);
 
-            // Optimized mixing loop with level scaling
+            // PERFORMANCE: SIMD-optimized mixing loop with NEON intrinsics
             const float level = trackInfo.level;
+
+            #ifdef __ARM_NEON__
+            // NEON SIMD path: Process 4 samples at a time (4x speedup)
+            const size_t simdSamples = totalSamples & ~3;  // Round down to multiple of 4
+
             if (level == 1.0f) {
-                // Fast path for unity gain
+                // Fast path: Unity gain addition (no scaling needed)
+                for (size_t j = 0; j < simdSamples; j += 4) {
+                    float32x4_t mix = vld1q_f32(&mixingBuffer[j]);
+                    float32x4_t out = vld1q_f32(&audioData[j]);
+                    out = vaddq_f32(out, mix);
+                    vst1q_f32(&audioData[j], out);
+                }
+            } else {
+                // General case: Scaled addition
+                float32x4_t levelVec = vdupq_n_f32(level);
+                for (size_t j = 0; j < simdSamples; j += 4) {
+                    float32x4_t mix = vld1q_f32(&mixingBuffer[j]);
+                    float32x4_t out = vld1q_f32(&audioData[j]);
+                    mix = vmulq_f32(mix, levelVec);
+                    out = vaddq_f32(out, mix);
+                    vst1q_f32(&audioData[j], out);
+                }
+            }
+
+            // Handle remaining samples (scalar fallback)
+            for (size_t j = simdSamples; j < totalSamples; ++j) {
+                audioData[j] += mixingBuffer[j] * level;
+            }
+            #else
+            // Scalar fallback for non-NEON platforms
+            if (level == 1.0f) {
                 for (size_t j = 0; j < totalSamples; ++j) {
                     audioData[j] += mixingBuffer[j];
                 }
             } else {
-                // General case with level scaling
                 for (size_t j = 0; j < totalSamples; ++j) {
                     audioData[j] += mixingBuffer[j] * level;
                 }
             }
+            #endif
         }
     }
 

@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cstdlib>  // For posix_memalign
 #include <cmath>    // For sinf, M_PI
+#include <sys/resource.h>  // For RT thread priority
+#include <unistd.h>  // For gettid
 
 #ifdef __ARM_NEON__
 #include <arm_neon.h>
@@ -304,10 +306,23 @@ inline void AndroidEngine::convertFloatToInt16(const float* input, int16_t* outp
 
 void AndroidEngine::playerCallback(SLAndroidSimpleBufferQueueItf bq, void* context) {
     AndroidEngine* engine = static_cast<AndroidEngine*>(context);
-    
+
+    // PERFORMANCE: Boost audio thread priority to near real-time (once)
+    static bool prioritySet = false;
+    if (!prioritySet) {
+        // Set high priority (nice value -19 is highest for non-root)
+        // This reduces scheduling latency and prevents audio dropouts
+        if (setpriority(PRIO_PROCESS, 0, -19) == 0) {
+            LOGI("Audio thread priority boosted to -19 (highest non-RT priority)");
+        } else {
+            LOGW("Failed to boost audio thread priority (may need permissions)");
+        }
+        prioritySet = true;
+    }
+
     // Performance monitoring
     engine->mTotalFrames.fetch_add(1);
-    
+
     // Get current buffer index atomically
     int currentBufferIndex = engine->mCurrentBuffer.load();
     int16_t* int16Buffer = engine->mAudioBuffers[currentBufferIndex];
