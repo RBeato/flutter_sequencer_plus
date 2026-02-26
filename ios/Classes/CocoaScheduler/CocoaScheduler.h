@@ -35,6 +35,10 @@ private:
     bool mGlobalCallbackActive = false;
 
     AudioUnit _Nonnull mMixerAudioUnit;
+
+    // PERFORMANCE: Pre-allocated array for track iteration (eliminates std::vector allocation in audio callback)
+    track_index_t mTrackCache[MAX_TRACKS];
+    std::atomic<size_t> mTrackCacheCount{0};
 };
 #endif
 

@@ -319,19 +319,22 @@ void AndroidEngine::playerCallback(SLAndroidSimpleBufferQueueItf bq, void* conte
     
     // Only render audio if playing, otherwise send silence
     if (engine->mIsPlaying.load(std::memory_order_relaxed)) {
-        // Debug: Log audio callback occasionally 
+        #ifdef DEBUG
+        // PERFORMANCE: Debug logging only enabled in debug builds (I/O can block audio thread)
         static int callbackCount = 0;
         if (++callbackCount % 1000 == 0) {
             LOGI("Audio callback active - rendering frame %d", callbackCount);
         }
-        
+        #endif
+
         try {
             // Render audio through the mixer to float buffer
             engine->mSchedulerMixer.renderAudio(floatBuffer, kBufferSizeFrames);
-            
-            // CRITICAL DEBUG: Check if audio is being rendered
+
+            #ifdef DEBUG
+            // PERFORMANCE: Audio analysis only in debug builds (CPU-intensive)
             static int debugCounter = 0;
-            if (++debugCounter % 2000 == 0) { // Much less frequent - every 2000 frames (~12 seconds)
+            if (++debugCounter % 2000 == 0) {
                 float maxSample = 0.0f;
                 const int totalSamples = kBufferSizeFrames * kChannelCount;
                 for (int i = 0; i < totalSamples; ++i) {
@@ -343,6 +346,7 @@ void AndroidEngine::playerCallback(SLAndroidSimpleBufferQueueItf bq, void* conte
                     LOGI("AndroidEngine: ⚠️ Still no audio from instruments (%.6f)", maxSample);
                 }
             }
+            #endif
         } catch (const std::exception& e) {
             LOGE("Error rendering audio: %s", e.what());
             engine->mDroppedFrames.fetch_add(1);

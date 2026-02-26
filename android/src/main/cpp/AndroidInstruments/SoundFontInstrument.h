@@ -68,11 +68,15 @@ public:
 
         if (mTsf != nullptr) {
             setTsfOutputFormat();
-            
+
+            // PERFORMANCE: Pre-allocate voices to prevent malloc during note-on events
+            // 256 voices should be sufficient for complex music (16 channels × 16 notes max)
+            tsf_set_max_voices(mTsf, 256);
+
             // Get SF2 info for debugging
             int presetCount = tsf_get_presetcount(mTsf);
-            LOGI("SF2 Loaded successfully: %d presets available, using preset %d", presetCount, presetIndex);
-            
+            LOGI("SF2 Loaded successfully: %d presets, preset %d, 256 voices pre-allocated", presetCount, presetIndex);
+
             // Validate preset index
             if (presetIndex >= presetCount) {
                 LOGE("SF2 Invalid preset index %d (max: %d), using preset 0", presetIndex, presetCount - 1);
@@ -114,20 +118,21 @@ public:
         // TinySoundFont requires 4 parameters: f, buffer, samples, flag_mixing
         // Use 0 for replace mode - the Mixer handles combining tracks
         tsf_render_float(mTsf, audioData, numFrames, 0);
-        
-        // Check for audio activity (very infrequent logging for performance)
+
+        #ifdef DEBUG
+        // PERFORMANCE: Audio analysis only in debug builds (CPU-intensive buffer scan)
         const int32_t totalSamples = numFrames * (mIsStereo ? 2 : 1);
         float maxSample = 0.0f;
         for (int32_t i = 0; i < totalSamples; ++i) {
             maxSample = std::max(maxSample, std::abs(audioData[i]));
         }
-        
-        // Log audio activity much less frequently (only every 2000 frames with audio)
+
         static int frameCounter = 0;
         if (++frameCounter % 2000 == 0 && maxSample > 0.001f) {
             LOGI("TSF: Audio rendered - max sample level: %.4f", maxSample);
         }
-        
+        #endif
+
         // Apply soft limiting to prevent clipping distortion
         constexpr float maxLevel = 0.95f;  // Leave headroom
         for (int32_t i = 0; i < totalSamples; ++i) {

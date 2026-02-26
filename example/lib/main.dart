@@ -408,9 +408,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     // Start native audio engine
     NativeBridge.play();
     sequence.play();
-    
-    // UI position updates at 60fps — audio timing is handled natively in C++ render callback
-    _playbackTimer = Timer.periodic(Duration(milliseconds: 16), (timer) {
+
+    // PERFORMANCE: UI position updates at 30fps (was 60fps) — reduces UI thread pressure on weak devices
+    // Audio timing is handled natively in C++ render callback, so lower UI update rate doesn't affect playback
+    _playbackTimer = Timer.periodic(Duration(milliseconds: 33), (timer) {
       _processPlayback();
     });
     

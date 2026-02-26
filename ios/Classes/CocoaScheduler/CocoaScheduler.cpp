@@ -38,19 +38,23 @@ void CocoaScheduler::startGlobalCallback() {
 }
 
 void CocoaScheduler::handleAllTracks(uint32_t numFrames) {
-    // Collect track indices under lock, then process without lock
-    std::vector<track_index_t> tracks;
+    // PERFORMANCE: Use pre-allocated array instead of std::vector to eliminate allocation
+    size_t trackCount = 0;
     {
         std::lock_guard<std::mutex> lock(mBufferMutex);
-        tracks.reserve(mBufferMap.size());
+        // Copy track indices into pre-allocated cache (minimal lock time)
         for (auto& pair : mBufferMap) {
-            if (pair.second != nullptr) {
-                tracks.push_back(pair.first);
+            if (pair.second != nullptr && trackCount < MAX_TRACKS) {
+                mTrackCache[trackCount++] = pair.first;
             }
         }
     }
+    // Store count atomically for potential diagnostic use
+    mTrackCacheCount.store(trackCount, std::memory_order_relaxed);
 
-    for (auto trackIndex : tracks) {
+    // Process all tracks outside the lock
+    for (size_t i = 0; i < trackCount; i++) {
+        track_index_t trackIndex = mTrackCache[i];
         auto it = mSampleRateMap.find(trackIndex);
         uint32_t scaledFrames = numFrames;
         if (it != mSampleRateMap.end() && it->second != mSampleRate) {
@@ -111,17 +115,19 @@ void CocoaScheduler::handleEvent(track_index_t trackIndex, SchedulerEvent event,
         auto midiEvent = MidiEventData(event.data);
 
         // CRITICAL: Sample-accurate MIDI event timing
-        OSStatus result = MusicDeviceMIDIEvent(trackAU, 
-                                              midiEvent.midiStatus, 
-                                              midiEvent.midiData1, 
-                                              midiEvent.midiData2, 
+        OSStatus result = MusicDeviceMIDIEvent(trackAU,
+                                              midiEvent.midiStatus,
+                                              midiEvent.midiData1,
+                                              midiEvent.midiData2,
                                               scaledOffsetFrame);
-        
-        // PERFORMANCE: Only log errors, not every event
+
+        #ifdef DEBUG
+        // PERFORMANCE: Only log errors in debug builds (printf can block on I/O)
         if (result != noErr && midiEvent.midiStatus == 0x90) {
-            printf("MIDI event failed: track=%d, status=0x%02X, error=%d\n", 
+            printf("MIDI event failed: track=%d, status=0x%02X, error=%d\n",
                    trackIndex, midiEvent.midiStatus, (int)result);
         }
+        #endif
     }
 }
 
