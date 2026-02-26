@@ -63,8 +63,8 @@ static OSStatus globalRenderCallback(
         maxRenderTime = renderTime;
     }
 
-    // Log every 2 seconds (avoid spam)
-    if (callbackCount % 100 == 0) { // ~100 callbacks = ~2 seconds at 48kHz/1024 samples
+    // Log every 5 seconds (very infrequent to avoid blocking audio thread)
+    if (callbackCount % 200 == 0) { // ~200 callbacks = ~5 seconds
         mach_timebase_info_data_t timebase;
         mach_timebase_info(&timebase);
 
@@ -76,16 +76,11 @@ static OSStatus globalRenderCallback(
         float cpuUsage = (avgRenderUs * 100.0f) / bufferTimeUs;
         float maxCpuUsage = (maxRenderUs * 100.0f) / bufferTimeUs;
 
-        printf("[AUDIO-PERF] Avg: %lluµs (%.1f%%), Max: %lluµs (%.1f%%), Buffer: %lluµs, Frames: %u\n",
-               avgRenderUs, cpuUsage, maxRenderUs, maxCpuUsage, bufferTimeUs, inNumberFrames);
-
-        // Warn if over 80% CPU
-        if (cpuUsage > 80.0f) {
-            printf("[AUDIO-WARN] ⚠️  CPU usage high! Possible buffer underruns!\n");
-        }
-        if (maxCpuUsage > 100.0f) {
-            printf("[AUDIO-ERROR] ❌ Buffer deadline missed! Underrun occurred!\n");
-        }
+        // Single printf to minimize audio thread blocking
+        printf("[AUDIO-PERF] Avg:%lluµs(%.0f%%) Max:%lluµs(%.0f%%) Buf:%lluµs F:%u%s%s\n",
+               avgRenderUs, cpuUsage, maxRenderUs, maxCpuUsage, bufferTimeUs, inNumberFrames,
+               (cpuUsage > 80.0f) ? " HIGH!" : "",
+               (maxCpuUsage > 100.0f) ? " UNDERRUN!" : "");
 
         // Reset stats for next period
         totalRenderTime = 0;
