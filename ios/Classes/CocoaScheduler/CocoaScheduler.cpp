@@ -41,8 +41,56 @@ static OSStatus globalRenderCallback(
         rtPrioritySet = true;
     }
 
+    // DIAGNOSTIC: Measure render callback performance
+    static uint64_t callbackCount = 0;
+    static uint64_t lastLogTime = 0;
+    static uint64_t totalRenderTime = 0;
+    static uint64_t maxRenderTime = 0;
+
+    uint64_t startTime = mach_absolute_time();
+
     auto scheduler = (CocoaScheduler*)inRefCon;
     scheduler->handleAllTracks(inNumberFrames);
+
+    uint64_t endTime = mach_absolute_time();
+    uint64_t renderTime = endTime - startTime;
+
+    // Track statistics
+    callbackCount++;
+    totalRenderTime += renderTime;
+    if (renderTime > maxRenderTime) {
+        maxRenderTime = renderTime;
+    }
+
+    // Log every 2 seconds (avoid spam)
+    if (callbackCount % 100 == 0) { // ~100 callbacks = ~2 seconds at 48kHz/1024 samples
+        mach_timebase_info_data_t timebase;
+        mach_timebase_info(&timebase);
+
+        // Convert to microseconds
+        uint64_t avgRenderUs = ((totalRenderTime / callbackCount) * timebase.numer) / (timebase.denom * 1000);
+        uint64_t maxRenderUs = (maxRenderTime * timebase.numer) / (timebase.denom * 1000);
+        uint64_t bufferTimeUs = (inNumberFrames * 1000000) / 48000; // Assume 48kHz
+
+        float cpuUsage = (avgRenderUs * 100.0f) / bufferTimeUs;
+        float maxCpuUsage = (maxRenderUs * 100.0f) / bufferTimeUs;
+
+        printf("[AUDIO-PERF] Avg: %lluµs (%.1f%%), Max: %lluµs (%.1f%%), Buffer: %lluµs, Frames: %u\n",
+               avgRenderUs, cpuUsage, maxRenderUs, maxCpuUsage, bufferTimeUs, inNumberFrames);
+
+        // Warn if over 80% CPU
+        if (cpuUsage > 80.0f) {
+            printf("[AUDIO-WARN] ⚠️  CPU usage high! Possible buffer underruns!\n");
+        }
+        if (maxCpuUsage > 100.0f) {
+            printf("[AUDIO-ERROR] ❌ Buffer deadline missed! Underrun occurred!\n");
+        }
+
+        // Reset stats for next period
+        totalRenderTime = 0;
+        maxRenderTime = 0;
+        callbackCount = 0;
+    }
 
     return noErr;
 }
