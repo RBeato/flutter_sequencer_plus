@@ -28,64 +28,8 @@ public class SwiftFlutterSequencerPlugin: NSObject, FlutterPlugin {
     
     public override init() {
         super.init()
-        
-        // Initialize audio session early
-        configureAudioSession()
-        
+        // Audio session now configured by CocoaEngine init - no duplicate config needed
         plugin = self
-    }
-    
-    private func configureAudioSession() {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            
-            // Check if session is already active and deactivate first to avoid conflicts
-            if session.isOtherAudioPlaying {
-                print("Other audio playing, configuring to mix")
-            }
-            
-            // HIGH-PERFORMANCE: Configure for low-latency audio playback
-            try session.setCategory(.playback, 
-                                   mode: .default, 
-                                   options: [.mixWithOthers, .allowBluetooth, .allowAirPlay, .defaultToSpeaker])
-            
-            // Set sample rate first (more compatible)
-            try session.setPreferredSampleRate(44100)
-            
-            // PERFORMANCE: Optimize buffer duration for immediate response
-            try session.setPreferredIOBufferDuration(0.005) // ~256 frames at 44.1kHz for minimal latency
-            
-            // Activate the session with retry logic
-            var attempts = 0
-            var sessionActivated = false
-            
-            while attempts < 3 && !sessionActivated {
-                do {
-                    try session.setActive(true, options: [])
-                    sessionActivated = true
-                    print("Audio session activated successfully on attempt \(attempts + 1)")
-                } catch {
-                    attempts += 1
-                    print("Audio session activation failed (attempt \(attempts)): \(error)")
-                    if attempts < 3 {
-                        Thread.sleep(forTimeInterval: 0.1) // Wait 100ms before retry
-                    }
-                }
-            }
-            
-            if sessionActivated {
-                print("Audio session configured successfully")
-                print("Category: \(session.category)")
-                print("Sample rate: \(session.sampleRate)")
-                print("IO buffer duration: \(session.ioBufferDuration)")
-            } else {
-                print("Failed to activate audio session after 3 attempts")
-            }
-            
-        } catch {
-            print("Failed to configure audio session: \(error)")
-            print("Error code: \((error as NSError).code)")
-        }
     }
     
     deinit {
@@ -116,8 +60,8 @@ public class SwiftFlutterSequencerPlugin: NSObject, FlutterPlugin {
     }
     
     private func initializeAudioSession(_ result: @escaping FlutterResult) {
-        // Re-configure if needed
-        configureAudioSession()
+        // Audio session configured by CocoaEngine - just report success
+        // Reconfiguring here caused error -50 conflicts
         result(true)
     }
     
