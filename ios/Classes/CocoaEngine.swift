@@ -36,10 +36,10 @@ public class CocoaEngine {
         do {
             let session = AVAudioSession.sharedInstance()
 
-            // CRITICAL FIX: Use safe buffer size for weak devices with multiple SF2 tracks
-            // 20ms provides stability on weak hardware while maintaining acceptable latency
-            // Lower values (5-12ms) cause buffer underruns on older iPhones with 7+ SF2 tracks
-            let preferredBufferSize = 0.020 // 20ms ≈ 960 samples at 48kHz
+            // CRITICAL FIX: Use very conservative buffer for weak devices with multiple SF2 tracks
+            // 30ms ensures stability on weak/older iPhones with heavy polyphonic SF2 rendering
+            // Testing showed 12ms and 20ms still caused glitches on weak devices with 7 SF2 tracks
+            let preferredBufferSize = 0.030 // 30ms ≈ 1440 samples at 48kHz
 
             try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
 
