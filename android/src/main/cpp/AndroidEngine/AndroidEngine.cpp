@@ -372,7 +372,6 @@ void AndroidEngine::playerCallback(SLAndroidSimpleBufferQueueItf bq, void* conte
     // Apply fade-in ramp on first buffer(s) after play to prevent startup pop/glitch
     int fadeRemaining = engine->mFadeInRemaining.load(std::memory_order_relaxed);
     if (fadeRemaining > 0) {
-        const int totalSamples = kBufferSizeFrames * kChannelCount;
         const int fadeStartFrame = kFadeInFrames - fadeRemaining;
         for (int frame = 0; frame < kBufferSizeFrames; ++frame) {
             int globalFrame = fadeStartFrame + frame;

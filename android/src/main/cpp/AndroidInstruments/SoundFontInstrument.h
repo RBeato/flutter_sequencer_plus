@@ -119,9 +119,10 @@ public:
         // Use 0 for replace mode - the Mixer handles combining tracks
         tsf_render_float(mTsf, audioData, numFrames, 0);
 
+        const int32_t totalSamples = numFrames * (mIsStereo ? 2 : 1);
+
         #ifdef DEBUG
         // PERFORMANCE: Audio analysis only in debug builds (CPU-intensive buffer scan)
-        const int32_t totalSamples = numFrames * (mIsStereo ? 2 : 1);
         float maxSample = 0.0f;
         for (int32_t i = 0; i < totalSamples; ++i) {
             maxSample = std::max(maxSample, std::abs(audioData[i]));
