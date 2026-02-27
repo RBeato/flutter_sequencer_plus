@@ -107,6 +107,7 @@ target_compile_options(flutter_sequencer PRIVATE
 )
 
 # PERFORMANCE: Link-time optimization for maximum performance
-set_target_properties(flutter_sequencer PROPERTIES
-    INTERPROCEDURAL_OPTIMIZATION TRUE  # Enable LTO
-)
+# Note: Cannot use INTERPROCEDURAL_OPTIMIZATION — CMake adds -fuse-ld=gold
+# which is not available in NDK 27+ on Apple Silicon. Use explicit flags instead.
+target_compile_options(flutter_sequencer PRIVATE -flto=thin)
+target_link_options(flutter_sequencer PRIVATE -flto=thin -fuse-ld=lld)
