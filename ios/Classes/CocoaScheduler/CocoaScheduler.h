@@ -27,6 +27,7 @@ public:
     void handleEvent(track_index_t trackIndex, SchedulerEvent event, position_frame_t offsetFrame);
     float getTrackVolume(track_index_t trackIndex);
     int scaleFrames(track_index_t trackIndex, UInt32 inNumberFrames, bool isToDeviceFrames);
+    double getEngineSampleRate() const { return mSampleRate; }
 private:
     double getSampleRate(AudioUnit _Nonnull audioUnit);
     double mSampleRate;

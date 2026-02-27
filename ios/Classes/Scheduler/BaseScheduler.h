@@ -35,13 +35,14 @@ public:
     uint32_t getBufferAvailableCount(track_index_t trackIndex);
     position_frame_t getPosition();
     uint64_t getLastRenderTimeUs();
+    bool isPlaying() const { return mIsPlaying.load(std::memory_order_acquire); }
 protected:
     std::unordered_map<track_index_t, std::shared_ptr<Buffer<>>> mBufferMap = {};
     std::unordered_map<track_index_t, bool> mHasRenderedMap = {};
     mutable std::mutex mBufferMutex; // Protects mBufferMap and mHasRenderedMap
+    std::atomic<position_frame_t> mPositionFrames{0}; // Protected: subclasses manage per-buffer position
 private:
     std::atomic<bool> mIsPlaying{false};
-    std::atomic<position_frame_t> mPositionFrames{0};
 };
 
 #endif

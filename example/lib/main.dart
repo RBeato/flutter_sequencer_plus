@@ -67,25 +67,12 @@ class CustomAudioUnitInstrument extends AudioUnitInstrument {
 
 void checkAsset() async {
   try {
-    // Check new SF2 files
-    print('[DEBUG] Checking asset: assets/sf2/DrumsSlavo.sf2');
-    final sf2Data1 = await rootBundle.load('assets/sf2/DrumsSlavo.sf2');
-    print('[DEBUG] Asset found: assets/sf2/DrumsSlavo.sf2, size: \\${sf2Data1.lengthInBytes} bytes');
-    
-    print('[DEBUG] Checking asset: assets/sf2/rhodes.sf2');
-    final sf2Data2 = await rootBundle.load('assets/sf2/rhodes.sf2');
-    print('[DEBUG] Asset found: assets/sf2/rhodes.sf2, size: \\${sf2Data2.lengthInBytes} bytes');
-    
-    print('[DEBUG] Checking asset: assets/sf2/korg.sf2');
-    final sf2Data3 = await rootBundle.load('assets/sf2/korg.sf2');
-    print('[DEBUG] Asset found: assets/sf2/korg.sf2, size: \\${sf2Data3.lengthInBytes} bytes');
-    
-    print('[DEBUG] Checking asset: assets/sf2/Electric_guitar.SF2');
-    final sf2Data4 = await rootBundle.load('assets/sf2/Electric_guitar.SF2');
-    print('[DEBUG] Asset found: assets/sf2/Electric_guitar.SF2, size: \\${sf2Data4.lengthInBytes} bytes');
-  } catch (e, stack) {
-    print('[ERROR] Asset NOT found: \\${e.toString()}');
-    print('[ERROR] Stack trace: \\${stack.toString()}');
+    await rootBundle.load('assets/sf2/DrumsSlavo.sf2');
+    await rootBundle.load('assets/sf2/rhodes.sf2');
+    await rootBundle.load('assets/sf2/korg.sf2');
+    await rootBundle.load('assets/sf2/Electric_guitar.SF2');
+  } catch (e) {
+    print('[ERROR] Asset NOT found: $e');
   }
 }
 
@@ -94,7 +81,6 @@ void main() {
   
   // Initialize audio session with proper settings
   if (Platform.isIOS) {
-    print('Running on iOS ${Platform.operatingSystemVersion}');
     _initAudioSession();
   }
   
@@ -106,9 +92,8 @@ Future<void> _initAudioSession() async {
   try {
     const methodChannel = MethodChannel('flutter_sequencer');
     await methodChannel.invokeMethod('initializeAudioSession');
-    print('Audio session initialized successfully');
   } catch (e) {
-    print('Error initializing audio session: $e');
+    print('[ERROR] Audio session init failed: $e');
   }
 }
 
@@ -142,11 +127,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   double _pausedAtBeat = 0.0;
   double _playbackStartBeat = 0.0;
   double? _lastNativePosition;
-  
-  // RACE CONDITION PREVENTION: Track rapid editing to prevent clearEvents() conflicts
-  Map<int, int> _lastLightweightSync = {};
-  static const int _rapidEditingThresholdMs = 500; // 500ms window for rapid editing detection
-  
+
   // Available sound instruments (SF2 + SFZ + AudioUnit)
   // 'sustain' = note duration in beats (default 0.9 for sustained, 0.25 for percussive)
   final List<Map<String, String>> _availableSoundFonts = [
@@ -329,15 +310,11 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     GlobalState().setIosNativeSchedulingEnabled(true);
     checkAsset();
     
-    print('[DEBUG] Platform: ${Platform.isIOS ? "iOS" : "Android"}');
-    print('[DEBUG] Initial state: isLooping=$isLooping (INITIAL_IS_LOOPING=$INITIAL_IS_LOOPING)');
-    
     // Initialize tracks with multi-track support
     _initializeTracks();
-    
+
     // CRITICAL: Set initial loop state after tracks are initialized
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      print('[DEBUG] Setting initial loop state: $isLooping');
       if (isLooping) {
         handleSetLoop(true);
       }
@@ -363,18 +340,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
 
   handleTogglePlayPause() {
-    print('[DEBUG] handleTogglePlayPause: currently isPlaying=$isPlaying isPaused=$isPaused isLooping=$isLooping');
     if (isPlaying) {
-      print('[DEBUG] Pausing sequence...');
       _pausePlayback();
       sequence.pause();
     } else {
-      print('[DEBUG] Starting/resuming playback...');
-      print('[DEBUG] Available tracks: ${tracks.length}');
-      for (final track in tracks) {
-        print('[DEBUG] Track ${track.id} has ${track.events.length} events');
-      }
-      
       // Start or resume playback
       if (isPaused) {
         _resumePlayback();
@@ -386,8 +355,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
   
   void _startSimplePlayback() {
-    print('[TIMING-FIX] Starting corrected real-time playback...');
-    
     // Reset all state
     _playbackStartTime = DateTime.now();
     _playbackStartBeat = 0.0;
@@ -404,25 +371,21 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     
     // Force sequence to start at beat 0.0 FIRST
     sequence.setBeat(0.0);
-    
-    // Start native audio engine
-    NativeBridge.play();
-    sequence.play();
+
+    // NOTE: Do NOT call NativeBridge.play() or sequence.play() here.
+    // handleTogglePlayPause() calls sequence.play() after this returns,
+    // which properly syncs events to the native buffer BEFORE starting
+    // the scheduler. Starting the scheduler first causes a race condition
+    // where the position advances before events are in the buffer.
 
     // PERFORMANCE: UI position updates at 30fps (was 60fps) — reduces UI thread pressure on weak devices
     // Audio timing is handled natively in C++ render callback, so lower UI update rate doesn't affect playback
     _playbackTimer = Timer.periodic(Duration(milliseconds: 33), (timer) {
       _processPlayback();
     });
-    
-    print('[TIMING-FIX] Real-time playback started with native sync');
   }
   
   void _scheduleAllEventsToNativeEngine() {
-    print('[NATIVE-TIMING] Pre-scheduling all events to native audio engine...');
-    
-    int totalEventsScheduled = 0;
-    
     for (final track in tracks) {
       final stepSequencerState = trackStepSequencerStates[track.id];
       if (stepSequencerState == null) continue;
@@ -446,90 +409,68 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       if (trackEvents.isNotEmpty) {
         // Schedule ALL events for this track at once to native engine
         // This eliminates real-time Dart processing completely
-        final scheduled = NativeBridge.scheduleEvents(
+        NativeBridge.scheduleEvents(
           track.id,
           trackEvents,
           GlobalState().sampleRate!,
           tempo,
           0 // Frame offset = 0 for immediate scheduling
         );
-        
-        totalEventsScheduled += scheduled;
-        print('[NATIVE-TIMING] Scheduled $scheduled events for track ${track.id}');
       }
     }
-    
-    print('[NATIVE-TIMING] Total events pre-scheduled to native engine: $totalEventsScheduled');
   }
   
   void _pausePlayback() {
-    print('[DEBUG] Pausing playback system...');
     _playbackTimer?.cancel();
     _playbackTimer = null;
-    
+
     // Save current position for resume
     _pausedAtBeat = position;
-    
-    // Pause the native engine
-    NativeBridge.pause();
-    
+
+    // NOTE: Do NOT call NativeBridge.pause() here.
+    // handleTogglePlayPause() calls sequence.pause() after this returns,
+    // which properly handles engine pause + buffer cleanup.
+
     setState(() {
       isPlaying = false;
       isPaused = true;
     });
-    
-    print('[DEBUG] Playback paused at beat $_pausedAtBeat');
   }
-  
+
   void _resumePlayback() {
-    print('[DEBUG] Resuming native audio playback from beat $_pausedAtBeat...');
     // Native timing handles resume automatically
-    
+
     setState(() {
       isPlaying = true;
       isPaused = false;
     });
-    
-    // Ensure engine is running
-    NativeBridge.play();
-    
+
+    // NOTE: Do NOT call NativeBridge.play() here.
+    // handleTogglePlayPause() calls sequence.play() after this returns,
+    // which properly syncs events BEFORE starting the native scheduler.
+
     // UI position updates at 60fps — audio timing is handled natively in C++ render callback
     _playbackTimer = Timer.periodic(Duration(milliseconds: 16), (timer) {
       _processPlayback();
     });
-    
-    print('[DEBUG] Playback resumed from beat $_pausedAtBeat');
   }
   
   void _stopSimplePlayback() {
-    print('[DEBUG] Stopping native audio playback...');
-    // Timer cleanup is no longer needed - using native timing
-    
-    // Send optimized note-off commands to only active tracks
-    int totalNotesOff = 0;
+    // Send note-off commands for common drum/instrument notes (36-81)
     for (final track in tracks) {
-      // Only send note-off for commonly used drum/instrument notes instead of all 128
       final noteOffEvents = <MidiEvent>[];
-      
-      // Common drum notes (36-81) and typical instrument range
       for (int noteNumber = 36; noteNumber <= 81; noteNumber++) {
         noteOffEvents.add(MidiEvent.ofNoteOff(beat: 0.0, noteNumber: noteNumber));
       }
-      
       if (noteOffEvents.isNotEmpty) {
         NativeBridge.handleEventsNow(
-          track.id, 
-          noteOffEvents, 
-          GlobalState().sampleRate!, 
+          track.id,
+          noteOffEvents,
+          GlobalState().sampleRate!,
           tempo
         );
-        totalNotesOff += noteOffEvents.length;
       }
     }
-    print('[DEBUG] Sent $totalNotesOff note-offs to stop sustained sounds');
-    
-    // DON'T stop the engine - keep SF2s loaded!
-    print('[DEBUG] Keeping audio engine running to preserve SF2 loading');
   }
   
   // Track playback start time to ensure proper position
@@ -571,7 +512,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       
       if (hasWrapped) {
         _loopCycle++;
-        print('[LOOP-COUNTER] Loop wrap detected! Previous: $previousBeat, Current: $nativeBeat, Loop: $_loopCycle');
       }
       
       _lastProcessedBeat = nativeBeat;
@@ -579,24 +519,18 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     
     // Check if we've reached the end (only for non-looping mode)
     if (!isLooping && nativeBeat >= stepCount) {
-      print('[DEBUG] Reached end: nativeBeat=$nativeBeat stepCount=$stepCount isLooping=$isLooping');
-      print('[DEBUG] Stopping playback (loop is OFF)...');
-      // Stop playback and reset everything to beginning
       _stopSimplePlayback();
-      
+
       setState(() {
         isPlaying = false;
         position = 0.0;
         isPaused = false;
       });
-      
-      print('[DEBUG] Single playback ended');
       return;
     }
   }
   
   handleStop() {
-    print('[DEBUG] handleStop called');
     _stopSimplePlayback();
     // Don't clear processed events - let loop-aware deduplication handle it
 
@@ -618,12 +552,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       final hasEvents = _trackHasEvents(track.id);
       if (hasEvents) {
         syncTrack(track);
-        print('[SYNC-EFFICIENT] Synced track ${track.id} (has events)');
-      } else {
-        print('[SYNC-EFFICIENT] Skipped track ${track.id} (no events)');
       }
     }
-    print('[DEBUG] Position reset to 0.0, pause state cleared, efficient track sync completed');
   }
   
   @override
@@ -679,70 +609,36 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
 
   handleTrackChange(Track? nextTrack) {
-    String instrumentInfo = '';
-    if (nextTrack != null) {
-      final inst = nextTrack.instrument;
-      if (inst is Sf2Instrument || inst is SfzInstrument) {
-        instrumentInfo = 'path=${inst.idOrPath}';
-      } else if (inst is AudioUnitInstrument) {
-        instrumentInfo = 'id=${inst.idOrPath}';
-      } else {
-        instrumentInfo = 'type=${inst.runtimeType}';
-      }
-    }
-    print('[DEBUG] Track changed: id=${nextTrack?.id} instrument=${nextTrack?.instrument.runtimeType} $instrumentInfo');
     setState(() {
       selectedTrack = nextTrack;
     });
   }
 
   handleVolumeChange(double nextVolume) {
-    print('[DEBUG] Volume change: trackId=${selectedTrack?.id} newVolume=$nextVolume');
     if (selectedTrack != null) {
       selectedTrack!.changeVolumeNow(volume: nextVolume);
-      // Update our UI state immediately (don't wait for ticker)
       setState(() {
         trackVolumes[selectedTrack!.id] = nextVolume;
       });
-      print('[DEBUG] Volume UI state updated to $nextVolume for track ${selectedTrack!.id}');
     }
   }
 
 
   handleVelocitiesChange(
       int trackId, int step, int noteNumber, double velocity) {
-    print('\n🎵 === HANDLE VELOCITIES CHANGE ===');
-    print('🎵 INPUT: trackId=$trackId, step=$step, noteNumber=$noteNumber, velocity=$velocity');
-    print('🎵 STATE: isPlaying=$isPlaying, Platform.isAndroid=${Platform.isAndroid}');
-    print('🎵 CURRENT SELECTED TRACK: ${selectedTrack?.id} (requesting trackId=$trackId)');
-
     final track = tracks.firstWhere((track) => track.id == trackId);
 
     trackStepSequencerStates[trackId]!.setVelocity(step, noteNumber, velocity);
-    print('🎵 ✅ Updated Dart state for trackId=$trackId');
-
-    // Debug: Print current events for this track
-    print('🎵 DEBUG: Current events for track $trackId:');
-    trackStepSequencerStates[trackId]!.iterateEvents((step, noteNumber, velocity) {
-      print('🎵   Step $step: note=$noteNumber, vel=$velocity');
-    });
 
     // PERFORMANCE: Mark track dirty with specific note info for immediate playback
     markTrackDirty(trackId, newStep: step, newNoteNumber: noteNumber, newVelocity: velocity);
-    print('🎵 ✅ Marked track $trackId as dirty');
-    
+
     // HYBRID ANDROID REAL-TIME EDITING: Immediate feedback + proper event scheduling
     if (Platform.isAndroid && isPlaying) {
-      print('🎵 ⚡ ANDROID REAL-TIME PATH: Using immediate event processing...');
-      // Use a new real-time safe approach that handles both adding and removing
       _addEventRealTime(track, step, noteNumber, velocity);
-      print('🎵 ⚡ ANDROID REAL-TIME PATH: Completed real-time event processing');
     } else {
-      print('🎵 📱 STANDARD PATH: Using full sync...');
       syncTrack(track);
-      print('🎵 📱 STANDARD PATH: Completed full sync');
     }
-    print('🎵 === END HANDLE VELOCITIES CHANGE ===\n');
   }
 
   /// Real-time safe event addition for Android during playback
@@ -752,17 +648,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     final noteDuration = _trackNoteDuration[track.id] ?? _calculateNoteDuration(currentTempo);
     final beat = step.toDouble();
 
-    print('[REAL-TIME] Processing event: step=$step, note=$noteNumber, vel=$velocity, beat=$beat');
-
     if (velocity > 0) {
-      // Adding a note
-      print('[REAL-TIME] Adding note to track');
-
-      // ANDROID FIX: For real-time addition during playback, we need to:
-      // 1. Add the note to the track (for future loops)
-      // 2. Force a complete sync to ensure native scheduling picks it up
-      // 3. Provide immediate feedback
-
       track.addNote(
         noteNumber: noteNumber,
         velocity: velocity,
@@ -770,9 +656,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         durationBeats: noteDuration,
       );
 
-      // CRITICAL: Force a complete track sync for Android native scheduling
-      // This ensures the new event is properly scheduled in the native engine
-      print('[REAL-TIME] Forcing complete track sync for native scheduling');
+      // Force a complete track sync for Android native scheduling
       syncTrack(track);
 
       // Provide immediate audio feedback for the current cycle
@@ -782,21 +666,12 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       Future.delayed(Duration(milliseconds: 300), () {
         track.stopNoteNow(noteNumber: noteNumber);
       });
-
-      print('[REAL-TIME] Note added, synced to native engine, and immediate feedback provided');
     } else {
-      // Removing a note - we need to clear and rebuild the track events
-      print('[REAL-TIME] Removing note - rebuilding track events');
-
       // Stop any currently playing instance of this note
       track.stopNoteNow(noteNumber: noteNumber);
 
-      // For note removal, we always need to sync the track completely
-      // since we can't remove individual events from the native engine
-      print('[REAL-TIME] Forcing complete track sync for note removal');
+      // Sync the track completely since we can't remove individual events
       syncTrack(track);
-
-      print('[REAL-TIME] Note removal completed with full sync');
     }
   }
 
@@ -817,12 +692,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
 
   // NATIVE BUFFER PRE-SCHEDULING: Schedule all events upfront instead of real-time
   void _preScheduleAllEvents() {
-    print('[NATIVE] Pre-scheduling all events into native buffers...');
-    
     final currentTempo = sequence.getTempo();
     final sampleRate = 44100; // Default sample rate
-
-    int totalEventsScheduled = 0;
 
     for (final track in tracks) {
       final trackId = track.id;
@@ -832,47 +703,37 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
 
       List<SchedulerEvent> eventsToSchedule = [];
 
-      // Use the iterateEvents method to get all velocity data
       stepSequencerState.iterateEvents((step, noteNumber, velocity) {
         if (step < stepCount && velocity > 0) {
           final beat = step.toDouble();
           final midiVelocity = (velocity * 127).round().clamp(1, 127);
 
-          // Note ON event
           eventsToSchedule.add(MidiEvent(
             beat: beat,
-            midiStatus: 0x90, // Note ON
+            midiStatus: 0x90,
             midiData1: noteNumber,
             midiData2: midiVelocity,
           ));
 
-          // Note OFF event
           eventsToSchedule.add(MidiEvent(
             beat: beat + noteDuration,
-            midiStatus: 0x80, // Note OFF
+            midiStatus: 0x80,
             midiData1: noteNumber,
             midiData2: 0,
           ));
         }
       });
-      
+
       if (eventsToSchedule.isNotEmpty) {
-        // Pre-schedule all events for this track in the native buffer
         NativeBridge.scheduleEvents(
           trackId,
           eventsToSchedule,
           sampleRate,
           currentTempo,
-          0, // Frame offset (start immediately)
+          0,
         );
-        
-        totalEventsScheduled += eventsToSchedule.length;
-        print('[NATIVE] Track $trackId: ${eventsToSchedule.length} events pre-scheduled');
       }
     }
-    
-    print('[NATIVE] Total $totalEventsScheduled events pre-scheduled across ${tracks.length} tracks');
-    print('[NATIVE] Native audio engine now handles all timing and event delivery automatically');
   }
 
   // PERFORMANCE OPTIMIZATION: Track dirty state and batch updates
@@ -883,98 +744,23 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   void markTrackDirty(int trackId, {int? newStep, int? newNoteNumber, double? newVelocity}) {
     _tracksDirty[trackId] = true;
 
-    print('[DEBUG-MARK-DIRTY] markTrackDirty called: trackId=$trackId, newStep=$newStep, newNote=$newNoteNumber, newVelocity=$newVelocity, isPlaying=$isPlaying, Platform.isAndroid=${Platform.isAndroid}');
-    
     // ANDROID REAL-TIME EDITING: Handle both note addition and removal
     if (isPlaying && Platform.isAndroid && newStep != null && newNoteNumber != null && newVelocity != null) {
       final track = tracks.firstWhere((t) => t.id == trackId, orElse: () => tracks.first);
 
       if (newVelocity > 0) {
-        // Adding a note - provide immediate feedback
-        print('[ANDROID-REAL-TIME] Adding note with immediate feedback: note=$newNoteNumber, velocity=$newVelocity');
         track.startNoteNow(noteNumber: newNoteNumber, velocity: newVelocity);
 
-        // Auto-stop after reasonable duration
         Future.delayed(Duration(milliseconds: 200), () {
           track.stopNoteNow(noteNumber: newNoteNumber);
         });
       } else {
-        // Removing a note - stop any playing instances immediately
-        print('[ANDROID-REAL-TIME] Removing note: note=$newNoteNumber');
         track.stopNoteNow(noteNumber: newNoteNumber);
       }
     }
     
   }
   
-  // RAPID EDITING DETECTION: Prevents clearEvents() race conditions during fast UI interaction
-  bool _isRapidEditing(int trackId) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final lastSync = _lastLightweightSync[trackId] ?? 0;
-    final timeSinceLastSync = now - lastSync;
-    
-    bool isRapid = timeSinceLastSync < _rapidEditingThresholdMs;
-    print('[DEBUG-RAPID] Track $trackId: timeSince=${timeSinceLastSync}ms, isRapid=$isRapid');
-    
-    return isRapid;
-  }
-  
-  // COMPREHENSIVE DIAGNOSTIC TEST SYSTEM
-  void _runDiagnosticTest(Track track, int trackId, String context) {
-    print('\n🔍 === COMPREHENSIVE DIAGNOSTIC TEST: $context ===');
-    
-    // 1. Check state consistency
-    final stateEventCount = _countStateEvents(trackId);
-    final trackEventCount = _countTrackEvents(track);
-    
-    print('🔍 STATE ANALYSIS:');
-    print('  - Dart state events: $stateEventCount');
-    print('  - Native track events: $trackEventCount');
-    print('  - State consistent: ${stateEventCount == trackEventCount}');
-    
-    // 2. Check specific events in state
-    print('🔍 DART STATE EVENTS:');
-    trackStepSequencerStates[trackId]!.iterateEvents((step, noteNumber, velocity) {
-      if (step < stepCount && velocity > 0) {
-        final beat = step.toDouble();
-        print('  - Step $step: note=$noteNumber, vel=$velocity, beat=$beat');
-      }
-    });
-    
-    // 3. Check timing info
-    final currentTempo = sequence.getTempo();
-    final noteDuration = _calculateNoteDuration(currentTempo);
-    print('🔍 TIMING INFO:');
-    print('  - Tempo: $currentTempo BPM');
-    print('  - Note duration: $noteDuration beats');
-    print('  - Sequence position: ${sequence.getBeat()}');
-    
-    // 4. Check rapid editing state
-    bool isRapid = _isRapidEditing(trackId);
-    print('🔍 RAPID EDITING:');
-    print('  - Is rapid editing: $isRapid');
-    print('  - Last sync: ${_lastLightweightSync[trackId] ?? 0}');
-    
-    print('🔍 === END DIAGNOSTIC TEST ===\n');
-  }
-  
-  // Count events in Dart state
-  int _countStateEvents(int trackId) {
-    int count = 0;
-    trackStepSequencerStates[trackId]!.iterateEvents((step, noteNumber, velocity) {
-      if (step < stepCount && velocity > 0) {
-        count++;
-      }
-    });
-    return count;
-  }
-  
-  // Count events in native track (approximation)
-  int _countTrackEvents(Track track) {
-    // Since we can't directly query track events, return the cached count
-    return _trackEventCounts[track.id] ?? 0;
-  }
-
   // Check if a track has any events in its state
   bool _trackHasEvents(int trackId) {
     final state = trackStepSequencerStates[trackId];
@@ -1030,21 +816,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     // PERFORMANCE: Only sync buffer if events actually changed
     final eventCountChanged = (_trackEventCounts[trackId] ?? 0) != noteCount;
     if (eventCountChanged || wasTempoChange) {
-      // Platform-specific buffer sync
+      // Platform-specific buffer sync handles clearing + re-scheduling
       track.syncBuffer();
-      
-      // REAL-TIME EDITING FIX: Graceful buffer update during playback
-      if (isPlaying && eventCountChanged) {
-        final sr = GlobalState().sampleRate ?? 44100;
-        // 1. Send all-notes-off (CC 123) to kill any sustaining notes on this track
-        final allNotesOff = [MidiEvent.cc(beat: 0, ccNumber: 123, ccValue: 0)];
-        NativeBridge.handleEventsNow(trackId, allNotesOff, sr, currentTempo);
-        // 2. Clear only FUTURE events (from current position), preserving imminent note-offs
-        final currentPos = NativeBridge.getPosition();
-        NativeBridge.clearEvents(trackId, currentPos);
-        track.lastFrameSynced = 0;
-        track.syncBuffer();
-      }
 
       _trackEventCounts[trackId] = noteCount;
     }
@@ -1055,17 +828,12 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
 
   loadProjectState(ProjectState projectState) {
-    print('[DEBUG] Loading project state');
     handleStop();
 
     // Clear all track states first
     for (final track in tracks) {
       trackStepSequencerStates[track.id] = StepSequencerState();
     }
-
-    // For reset, just use empty states - for demo, could assign specific patterns
-    // But for now, reset should just clear everything
-    print('[DEBUG] All track states cleared for reset');
 
     handleStepCountChange(projectState.stepCount);
     handleTempoChange(projectState.tempo);
@@ -1079,13 +847,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       final hasEvents = _trackHasEvents(track.id);
       if (hasEvents) {
         syncTrack(track);
-        print('[SYNC-EFFICIENT] Synced track ${track.id} (has events)');
-      } else {
-        print('[SYNC-EFFICIENT] Skipped track ${track.id} (no events)');
       }
     }
   }
-  
+
   // Removed _changeSoundFont - use TrackSelector instead
   
   Future<void> _initializeTracks() async {
@@ -1156,12 +921,9 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         );
       }
     }
-    print('[DEBUG] Total instruments to create: ${instruments.length}');
-    
     // Create tracks
     try {
       final newTracks = await sequence.createTracks(instruments);
-      print('[DEBUG] Created ${newTracks.length} tracks from ${instruments.length} instruments');
       
       setState(() {
         tracks = newTracks;
@@ -1238,7 +1000,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
 
   handleSoundFontChange(String newSoundFont) {
-    print('[DEBUG] Changing soundfont to: $newSoundFont');
     setState(() {
       _selectedSoundFont = newSoundFont;
     });
@@ -1248,14 +1009,11 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   }
   
   Future<void> _reinitializeTracks() async {
-    print('[DEBUG] Reinitializing tracks with GM preset $_selectedGMPreset');
-    
     // Store current playback state to preserve timing
     final wasPlaying = isPlaying;
     final wasPaused = isPaused;
     final currentPosition = position;
     final currentPausedAtBeat = _pausedAtBeat;
-    print('[DEBUG] Storing playback state: playing=$wasPlaying paused=$wasPaused position=$currentPosition');
     
     // Store current track states and volumes
     final currentStates = <int, StepSequencerState>{};
@@ -1282,14 +1040,11 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       if (currentVolumes.containsKey(track.id)) {
         trackVolumes[track.id] = currentVolumes[track.id]!;
         track.changeVolumeNow(volume: currentVolumes[track.id]!);
-        print('[DEBUG] Restored volume ${currentVolumes[track.id]} for track ${track.id}');
       }
     }
     
     // Restore playback state if we were playing
     if (wasPlaying && !wasPaused) {
-      print('[DEBUG] Restoring active playback state...');
-      
       setState(() {
         isPlaying = true;
         isPaused = false;
@@ -1303,31 +1058,21 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       
       // Ensure engine is running
       NativeBridge.play();
-      print('[DEBUG] Playback state restored and timer restarted');
     } else if (wasPaused) {
-      print('[DEBUG] Restoring paused state...');
       _pausedAtBeat = currentPausedAtBeat;
       setState(() {
         isPlaying = false;
         isPaused = true;
         position = currentPosition;
       });
-      print('[DEBUG] Paused state restored');
-    } else {
-      print('[DEBUG] Playback was stopped - maintaining stopped state');
     }
-    
-    print('[DEBUG] Tracks reinitialized and all states restored');
   }
 
   /// Test SFZ playback with a simple melody
   void _testSfzPlayback() {
-    if (selectedTrack == null || !(selectedTrack!.instrument is SfzInstrument)) {
-      print('[ERROR] Cannot test SFZ - no SFZ track selected');
+    if (selectedTrack == null || selectedTrack!.instrument is! SfzInstrument) {
       return;
     }
-    
-    print('[DEBUG] 🎵 Testing SFZ playback on track ${selectedTrack!.id}...');
     
     // Stop current playback
     if (isPlaying) {
@@ -1352,10 +1097,8 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         durationBeats: noteDuration,
       );
       
-      print('[DEBUG] Added test note: ${noteNumber} at beat ${startBeat}');
     }
-    
-    // Sync the track
+
     selectedTrack!.syncBuffer();
     
     // Set up sequencer for test playback
@@ -1364,8 +1107,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     });
     sequence.setEndBeat(stepCount.toDouble());
     
-    // Start playback automatically
-    print('[DEBUG] 🎵 Starting SFZ test playback...');
     handleTogglePlayPause();
     
     // Show a snackbar to inform the user
@@ -1382,12 +1123,9 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
 
   /// Test AudioUnit playback with GM presets demonstration
   void _testAudioUnitPlayback() {
-    if (selectedTrack == null || !(selectedTrack!.instrument is AudioUnitInstrument)) {
-      print('[ERROR] Cannot test AudioUnit - no AudioUnit track selected');
+    if (selectedTrack == null || selectedTrack!.instrument is! AudioUnitInstrument) {
       return;
     }
-    
-    print('[DEBUG] 🍎 Testing Apple AudioUnit playback on track ${selectedTrack!.id}...');
     
     // Stop current playback
     if (isPlaying) {
@@ -1415,7 +1153,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       final test = gmTests[testIndex];
       final preset = test['preset'] as int;
       final notes = test['notes'] as List<int>;
-      final name = test['name'] as String;
       
       // Add program change to switch to this preset (MIDI status 0xC0 = Program Change)
       selectedTrack!.events.add(MidiEvent(
@@ -1437,11 +1174,9 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
           durationBeats: noteDuration,
         );
         
-        print('[DEBUG] Added AudioUnit test: preset $preset ($name) note $noteNumber at beat $startBeat');
       }
     }
-    
-    // Sync the track
+
     selectedTrack!.syncBuffer();
     
     // Set up sequencer for test playback (needs 16 beats for all tests)
@@ -1450,8 +1185,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     });
     sequence.setEndBeat(stepCount.toDouble());
     
-    // Start playback automatically
-    print('[DEBUG] 🍎 Starting Apple AudioUnit test playback...');
     handleTogglePlayPause();
     
     // Show a snackbar to inform the user

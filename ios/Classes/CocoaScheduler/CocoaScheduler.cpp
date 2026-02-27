@@ -42,51 +42,51 @@ static OSStatus globalRenderCallback(
         rtPrioritySet = true;
     }
 
-    // DIAGNOSTIC: Measure render callback performance
+    auto scheduler = (CocoaScheduler*)inRefCon;
+
+#ifdef DEBUG
+    // DIAGNOSTIC: Measure render callback performance (debug builds only)
+    // printf can block on I/O and cause glitches in release builds
     static uint64_t callbackCount = 0;
-    static uint64_t lastLogTime = 0;
     static uint64_t totalRenderTime = 0;
     static uint64_t maxRenderTime = 0;
 
     uint64_t startTime = mach_absolute_time();
+#endif
 
-    auto scheduler = (CocoaScheduler*)inRefCon;
     scheduler->handleAllTracks(inNumberFrames);
 
+#ifdef DEBUG
     uint64_t endTime = mach_absolute_time();
     uint64_t renderTime = endTime - startTime;
 
-    // Track statistics
     callbackCount++;
     totalRenderTime += renderTime;
     if (renderTime > maxRenderTime) {
         maxRenderTime = renderTime;
     }
 
-    // Log every 5 seconds (very infrequent to avoid blocking audio thread)
-    if (callbackCount % 200 == 0) { // ~200 callbacks = ~5 seconds
+    if (callbackCount % 200 == 0) {
         mach_timebase_info_data_t timebase;
         mach_timebase_info(&timebase);
 
-        // Convert to microseconds
         uint64_t avgRenderUs = ((totalRenderTime / callbackCount) * timebase.numer) / (timebase.denom * 1000);
         uint64_t maxRenderUs = (maxRenderTime * timebase.numer) / (timebase.denom * 1000);
-        uint64_t bufferTimeUs = (inNumberFrames * 1000000) / 48000; // Assume 48kHz
+        uint64_t bufferTimeUs = (inNumberFrames * 1000000) / (uint64_t)scheduler->getEngineSampleRate();
 
         float cpuUsage = (avgRenderUs * 100.0f) / bufferTimeUs;
         float maxCpuUsage = (maxRenderUs * 100.0f) / bufferTimeUs;
 
-        // Single printf to minimize audio thread blocking
         printf("[AUDIO-PERF] Avg:%lluµs(%.0f%%) Max:%lluµs(%.0f%%) Buf:%lluµs F:%u%s%s\n",
                avgRenderUs, cpuUsage, maxRenderUs, maxCpuUsage, bufferTimeUs, inNumberFrames,
                (cpuUsage > 80.0f) ? " HIGH!" : "",
                (maxCpuUsage > 100.0f) ? " UNDERRUN!" : "");
 
-        // Reset stats for next period
         totalRenderTime = 0;
         maxRenderTime = 0;
         callbackCount = 0;
     }
+#endif
 
     return noErr;
 }
@@ -112,21 +112,37 @@ void CocoaScheduler::handleAllTracks(uint32_t numFrames) {
     // PERFORMANCE: Lock-free audio callback - read track count atomically
     // Main thread updates mTrackCacheCount after rebuilding mTrackCache
     size_t trackCount = mTrackCacheCount.load(std::memory_order_acquire);
+    if (trackCount == 0) return;
 
-    // Process all tracks without any locks (audio thread is read-only)
+    // CRITICAL FIX: Don't advance position when not playing.
+    // The render callback fires every buffer cycle regardless of play state.
+    // Without this guard, mPositionFrames drifts thousands of frames per second
+    // while idle, causing scheduled events to be skipped when Play is pressed.
+    if (!isPlaying()) return;
+
+    // CRITICAL FIX: All tracks must process the SAME frame range.
+    // handleFrames() advances mPositionFrames, so without resetting,
+    // each track would process a different range — causing N*tempo speedup.
+    auto startPosition = mPositionFrames.load(std::memory_order_acquire);
+
     for (size_t i = 0; i < trackCount; i++) {
         track_index_t trackIndex = mTrackCache[i];
-        auto it = mSampleRateMap.find(trackIndex);
-        uint32_t scaledFrames = numFrames;
-        if (it != mSampleRateMap.end() && it->second != mSampleRate) {
-            scaledFrames = numFrames * (mSampleRate / it->second);
-        }
-        handleFrames(trackIndex, scaledFrames);
+
+        // Reset position so this track processes the same range as all others
+        mPositionFrames.store(startPosition, std::memory_order_relaxed);
+
+        handleFrames(trackIndex, numFrames);
     }
+
+    // Advance position exactly ONCE for the entire buffer cycle
+    mPositionFrames.store(startPosition + numFrames, std::memory_order_release);
 }
 
 void CocoaScheduler::setTrackAudioUnit(track_index_t trackIndex, AudioUnit _Nonnull audioUnit) {
-    mSampleRateMap[trackIndex] = getSampleRate(audioUnit);
+    // Use engine sample rate for all tracks, not AudioUnit's internal rate.
+    // AUs may report 44.1kHz internally even when connected at 48kHz,
+    // which would cause scaleFrames() to distort event timing by ~9%.
+    mSampleRateMap[trackIndex] = mSampleRate;
     mAudioUnitMap[trackIndex] = audioUnit;
 
     // Create event buffer for this track (required for scheduleEvents to work)

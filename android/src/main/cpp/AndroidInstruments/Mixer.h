@@ -53,6 +53,18 @@ public:
             return;
         }
 
+        // CRITICAL FIX: Don't advance position when not playing.
+        // Audio callback fires every buffer cycle regardless of play state.
+        // Without this guard, mPositionFrames drifts while idle.
+        if (!isPlaying()) {
+            return;
+        }
+
+        // CRITICAL FIX: All tracks must process the SAME frame range.
+        // handleFrames() advances mPositionFrames, so without resetting,
+        // each track would process a different range — causing N*tempo speedup.
+        auto startPosition = mPositionFrames.load(std::memory_order_acquire);
+
         // Render each track and mix
         for (const auto& pair : mTrackMap) {
             const auto trackIndex = pair.first;
@@ -71,6 +83,9 @@ public:
             __builtin_prefetch(&mixingBuffer[0], 1, 3);  // Write prefetch, high temporal locality
             __builtin_prefetch(&audioData[0], 0, 3);  // Read prefetch for accumulation
             #endif
+
+            // Reset position so this track processes the same range as all others
+            mPositionFrames.store(startPosition, std::memory_order_relaxed);
 
             handleFrames(trackIndex, numFrames);
 
@@ -118,6 +133,9 @@ public:
             }
             #endif
         }
+
+        // Advance position exactly ONCE for the entire buffer cycle
+        mPositionFrames.store(startPosition + numFrames, std::memory_order_release);
     }
 
     void handleRenderAudioRange(track_index_t trackIndex, uint32_t offsetFrame, uint32_t numFramesToRender) {

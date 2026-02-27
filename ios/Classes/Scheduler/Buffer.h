@@ -35,11 +35,18 @@ public:
     }
     
     void clearAfter(position_frame_t frame) {
-        buffer_index_t existingEventsCount = count();
+        buffer_index_t currentRead = mReadPosition.load(std::memory_order_acquire);
+        buffer_index_t currentWrite = mWritePosition.load(std::memory_order_acquire);
+        buffer_index_t existingEventsCount = currentWrite - currentRead;
 
-        for (buffer_index_t i = mReadPosition; i - mReadPosition < existingEventsCount; i++) {
+        for (buffer_index_t i = currentRead; (i - currentRead) < existingEventsCount; i++) {
             if (mEvents[mask(i)].frame >= frame) {
-                mWritePosition = i;
+                // Re-read mReadPosition — the audio thread may have advanced it.
+                // If it moved past our clear point, set write = latest read (empty buffer)
+                // instead of skipping the clear (which would leave stale events).
+                buffer_index_t latestRead = mReadPosition.load(std::memory_order_acquire);
+                buffer_index_t newWrite = ((i - latestRead) <= BUFFER_SIZE) ? i : latestRead;
+                mWritePosition.store(newWrite, std::memory_order_release);
                 break;
             }
         }

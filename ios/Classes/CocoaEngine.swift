@@ -15,6 +15,8 @@ public class CocoaEngine {
     private let audioUnitsQueue = DispatchQueue(label: "com.flutter_sequencer.audiounits", attributes: .concurrent)
     private var nextTrackId: track_index_t = 0
     private let trackIdQueue = DispatchQueue(label: "com.flutter_sequencer.trackid")
+    private var startupUnmuteWorkItem: DispatchWorkItem?  // Debounced unmute after track loading
+    private var fallbackUnmuteWorkItem: DispatchWorkItem?  // 3s fallback unmute
     
     // CRITICAL FIX: Position tracking for audio-visual sync
     private var playbackStartSampleTime: AVAudioFramePosition = 0
@@ -71,13 +73,34 @@ public class CocoaEngine {
         // Initialize timebase for mach_absolute_time conversions
         mach_timebase_info(&timebaseInfo)
 
+        // Force consistent sample rate through entire audio graph
+        engine.connect(engine.mainMixerNode, to: engine.outputNode, format: outputFormat)
+        print("[AUDIO] Mixer→Output connected at \(outputFormat.sampleRate)Hz")
+
         // CRITICAL: Start engine immediately to eliminate first-play delay
+        // Mute output during startup to suppress audio graph reconfiguration transients
+        // (attaching/connecting AudioUnits to a running engine causes brief pops)
+        engine.mainMixerNode.outputVolume = 0
         do {
             engine.prepare()
             try engine.start()
         } catch {
             print("[ERROR] Failed to pre-start engine: \(error)")
         }
+
+        // Fallback unmute: 3s covers even slow SF2 loading on weak devices.
+        // The debounced unmute in scheduleStartupUnmute() fires sooner (200ms after
+        // the last track connects) and cancels this fallback, so it only fires
+        // if no tracks are created or loading takes unusually long.
+        let fallback = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            if self.engine.mainMixerNode.outputVolume < 0.01 {
+                self.fadeInMixer()
+                print("[AUDIO] Output volume fade-in (fallback timer)")
+            }
+        }
+        fallbackUnmuteWorkItem = fallback
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: fallback)
 
         // Initialize C++ scheduler on the output node's AudioUnit
         // AVAudioOutputNode (AVAudioIONode subclass) exposes audioUnit property
@@ -246,7 +269,13 @@ public class CocoaEngine {
             return
         }
 
-        // Start scheduler if available
+        // CC123 All Notes Off REMOVED from play():
+        // Sending CC123 to all 7 AudioUnits creates a subtle release transient
+        // on Apple Sampler even when no notes are active. Notes are properly
+        // stopped by: (1) individual note-offs in stop/pause, (2) 200ms auto-off
+        // for preview notes, (3) LEAD_FRAMES silence gap before first events.
+
+        // Start scheduler if available.
         if let scheduler = scheduler {
             SchedulerPlay(scheduler)
         }
@@ -307,49 +336,45 @@ public class CocoaEngine {
             SchedulerPause(scheduler)
         }
         
-        // CRITICAL FIX: Keep engine running to preserve SF2 AudioUnit connections
-        // Only send note-off messages to stop hanging notes, don't stop the engine (thread-safe)
+        // Keep engine running to preserve SF2 AudioUnit connections.
+        // Use CC123 (All Notes Off) — single MIDI event per track instead of
+        // 128 individual note-offs. Much less MIDI traffic and no burst of events
+        // that could cause audio thread contention.
         if self.engine.isRunning {
             let audioUnits = audioUnitsQueue.sync { Array(self.unsafeAvAudioUnits.values) }
             for audioUnit in audioUnits {
-                for noteNumber in 0...127 {
-                    let noteOffCommand: UInt32 = 0x80 // Note Off, channel 0
-                    let _ = MusicDeviceMIDIEvent(audioUnit.audioUnit, noteOffCommand, UInt32(noteNumber), 0, 0)
-                }
+                MusicDeviceMIDIEvent(audioUnit.audioUnit, 0xB0, 123, 0, 0)
             }
         }
     }
-    
+
     func stop() {
-        
+
         guard Thread.isMainThread else {
             DispatchQueue.main.async { self.stop() }
             return
         }
-        
+
         // Reset all playback state
         isPlaying = false
         isPaused = false
         playbackStartSampleTime = 0
         pausedAtSampleTime = 0
         startHostTime = 0
-        
+
         // Stop scheduler if available
         if let scheduler = scheduler {
             SchedulerPause(scheduler)
         }
-        
-        // Send note-off to all tracks (thread-safe)
+
+        // CC123 All Notes Off — efficient single event per track
         if self.engine.isRunning {
             let audioUnits = audioUnitsQueue.sync { Array(self.unsafeAvAudioUnits.values) }
             for audioUnit in audioUnits {
-                for noteNumber in 0...127 {
-                    let noteOffCommand: UInt32 = 0x80
-                    let _ = MusicDeviceMIDIEvent(audioUnit.audioUnit, noteOffCommand, UInt32(noteNumber), 0, 0)
-                }
+                MusicDeviceMIDIEvent(audioUnit.audioUnit, 0xB0, 123, 0, 0)
             }
         }
-        
+
     }
     
     func getPosition() -> UInt32 {
@@ -412,28 +437,70 @@ public class CocoaEngine {
         }
     }
     
-    /// Disable instrument priming - causing no sound issue
+    /// Priming DISABLED: Sending MIDI Note On/Off during track creation causes audible
+    /// glitches in two scenarios:
+    /// 1. During instrument changes while playing (mixer at full volume → audible notes)
+    /// 2. During startup (note-on/off at offset 0 → one-sample click in residual signal,
+    ///    then amplified by instant unmute transition)
+    /// Apple's AUSampler loads samples fast enough that first-note latency is negligible.
     private func primeInstrument(avAudioUnit: AVAudioUnit) {
-        // DISABLED: Priming was preventing sound output
-        // AudioUnits initialize correctly without explicit priming
+        // No-op: priming removed to eliminate audio glitches.
+        // See git history for previous implementation.
+    }
+
+    /// Debounced startup unmute: reschedules 200ms after each track connection.
+    /// This ensures ALL tracks are connected before audio becomes audible.
+    /// Uses a gradual fade-in to prevent pop from instant 0→1 volume transition.
+    private func scheduleStartupUnmute() {
+        startupUnmuteWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            // Cancel the 3s fallback — this debounced unmute takes priority
+            self.fallbackUnmuteWorkItem?.cancel()
+            self.fadeInMixer()
+        }
+        startupUnmuteWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
+    }
+
+    /// Gradually fade mixer volume from 0 to 1 over ~50ms to avoid pop.
+    /// Uses 5 steps of 10ms each (smooth enough to be inaudible).
+    private func fadeInMixer(duration: TimeInterval = 0.05, steps: Int = 5) {
+        let stepDuration = duration / Double(steps)
+        for i in 1...steps {
+            let volume = Float(i) / Float(steps)
+            DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(i)) { [weak self] in
+                self?.engine.mainMixerNode.outputVolume = volume
+            }
+        }
+        print("[AUDIO] Output volume fade-in started (\(Int(duration * 1000))ms)")
     }
 
     // HIGH-PERFORMANCE connection optimized for immediate playback
     private func performanceConnect(avAudioUnit: AVAudioUnit, trackIndex: track_index_t) {
-        do {
-            // Attach to engine
-            self.engine.attach(avAudioUnit)
-            
-            // Connect with optimal format
-            let format = avAudioUnit.outputFormat(forBus: 0)
-            self.engine.connect(avAudioUnit, to: self.engine.mainMixerNode, format: format)
-            
-            // Update tracking
-            updateAvAudioUnits(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
-            
-        } catch {
-            print("[ERROR] Performance connection failed: \(error)")
+        // Use hardware format for all connections to avoid automatic resampling.
+        // AudioUnits may report 44.1kHz internally, but AVAudioEngine connects
+        // them at the hardware rate (48kHz). Using the AU's own format would force
+        // an unnecessary sample rate converter, adding CPU overhead and latency.
+        let hardwareFormat = engine.outputNode.outputFormat(forBus: 0)
+        let auFormat = avAudioUnit.outputFormat(forBus: 0)
+
+        // GLITCH FIX: Mute before graph reconfiguration if mixer is audible.
+        // engine.attach() + engine.connect() on a running engine causes CoreAudio
+        // to briefly reconfigure the audio graph, producing a transient pop.
+        // Muting first makes this inaudible; fadeInMixer restores volume after.
+        if engine.mainMixerNode.outputVolume > 0 {
+            engine.mainMixerNode.outputVolume = 0
         }
+
+        engine.attach(avAudioUnit)
+        engine.connect(avAudioUnit, to: engine.mainMixerNode, format: hardwareFormat)
+        updateAvAudioUnits(trackIndex: trackIndex, avAudioUnit: avAudioUnit)
+        print("[AUDIO] Track \(trackIndex) connected at \(hardwareFormat.sampleRate)Hz (AU reported \(auFormat.sampleRate)Hz)")
+
+        // Reschedule startup unmute — waits 200ms after the LAST track connects,
+        // then fades in gradually to avoid pop from instant 0→1 transition
+        scheduleStartupUnmute()
     }
     
     // Helper to start engine when we have connected nodes (thread-safe)

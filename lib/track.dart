@@ -333,15 +333,11 @@ class Track {
       absoluteStartFrame = max(absoluteStartFrame, position);
     }
 
-    final positionDiff = (absoluteStartFrame - lastFrameSynced).abs();
-    
-    // SEAMLESS LOOP FIX: NEVER clear events during looping to prevent audible restart
-    // This restores the original flutter_sequencer "buffer topping off" behavior
-    final isLooping = sequence.loopState != LoopState.Off;
-    final clearThreshold = isLooping ? 999999 : 100; // Extremely high threshold during loops
-    
-    if (positionDiff > clearThreshold && !isLooping) {
-      // Only clear events when NOT looping - this prevents the audible restart
+    // Always clear events from current position during playback before re-scheduling.
+    // This ensures modified events replace old ones in the native buffer.
+    // Without clearing, old events persist alongside new ones → double-triggers/glitches
+    // when the user modifies notes, velocities, or changes instruments during playback.
+    if (sequence.isPlaying) {
       NativeBridge.clearEvents(id, absoluteStartFrame);
     }
 

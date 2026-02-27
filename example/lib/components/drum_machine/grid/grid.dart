@@ -46,9 +46,15 @@ class Grid extends StatelessWidget {
                         isCurrentStep: step == currentStep && currentStep >= 0,
                         onChange: (velocity) {
                           onChange(col, step, velocity);
-                          // Trigger note playback when velocity > 0 (note added)
+                          // Trigger note preview when velocity > 0 (note added)
                           if (velocity > 0.0) {
                             onNoteOn(col);
+                            // Auto-stop preview note after 200ms to prevent sustained pile-up.
+                            // Without this, tapping many cells rapidly creates many simultaneous
+                            // sustaining notes that overload the sampler and cause glitches.
+                            Future.delayed(Duration(milliseconds: 200), () {
+                              onNoteOff(col);
+                            });
                           }
                         },
                       ),
