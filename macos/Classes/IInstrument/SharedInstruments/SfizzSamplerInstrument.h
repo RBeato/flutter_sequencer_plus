@@ -44,8 +44,10 @@ public:
     }
 
     void renderAudio(float *audioData, int32_t numFrames) override {
-        float* leftBuffer = new float[numFrames];
-        float* rightBuffer = new float[numFrames];
+        // Stack allocation (matches iOS) — no heap allocation on the audio
+        // render thread. Host buffers are bounded (<= a few thousand frames).
+        float leftBuffer[numFrames];
+        float rightBuffer[numFrames];
         float* buffers[2];
 
         buffers[0] = leftBuffer;
@@ -67,9 +69,6 @@ public:
                 audioData[f] = (buffers[0][f] + buffers[1][f]) * 0.5f;
             }
         }
-
-        delete[] leftBuffer;
-        delete[] rightBuffer;
     }
 
     void handleMidiEvent(uint8_t status, uint8_t data1, uint8_t data2) override {

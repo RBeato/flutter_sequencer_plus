@@ -5,11 +5,9 @@
 
 @interface SfizzAU ()
 {
-    // Initialize _isInitialized in the constructor
-    std::atomic_bool _isInitialized;
-
     std::unique_ptr<sfz::Sfizz> _sfz;
     AVAudioFormat *_format;
+    // Initialized in the constructor
     std::atomic_bool _isInitialized;
 }
 
