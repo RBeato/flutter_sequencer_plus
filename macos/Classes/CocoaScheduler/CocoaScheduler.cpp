@@ -50,7 +50,9 @@ void CocoaScheduler::onRemoveTrack(track_index_t trackIndex) {
 }
 
 void CocoaScheduler::onResetTrack(track_index_t trackIndex) {
-    AudioUnitReset(mAudioUnitMap[trackIndex], kAudioUnitScope_Global, 0);
+    auto it = mAudioUnitMap.find(trackIndex);
+    if (it == mAudioUnitMap.end()) return;
+    AudioUnitReset(it->second, kAudioUnitScope_Global, 0);
 }
 
 void CocoaScheduler::handleRenderAudioRange(track_index_t trackIndex, uint32_t offsetFrame, uint32_t numFramesToRender) {
